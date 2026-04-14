@@ -34,8 +34,14 @@ body {
 .editor-canvas {
   @apply rounded-2xl border border-slate-200/90;
   background-color: rgb(241 245 249);
-  background-image: radial-gradient(rgb(203 213 225 / 0.5) 1px, transparent 1px);
-  background-size: 22px 22px;
+  background-image:
+    radial-gradient(rgb(203 213 225 / 0.45) 1px, transparent 1px),
+    linear-gradient(180deg, rgb(248 250 252 / 0.5) 0%, transparent 50%);
+  background-size: 22px 22px, 100% 100%;
+}
+
+.editor-canvas-paper[data-placeholder="true"] .ProseMirror {
+  min-height: min(52vh, 640px);
 }
 
 .editor-canvas-paper {
