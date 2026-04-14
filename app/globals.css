@@ -31,6 +31,34 @@ body {
   outline: none;
 }
 
+.editor-canvas {
+  @apply rounded-2xl border border-slate-200/90;
+  background-color: rgb(241 245 249);
+  background-image: radial-gradient(rgb(203 213 225 / 0.5) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.editor-canvas-paper {
+  @apply rounded-sm border border-slate-200/70 bg-white;
+  box-shadow:
+    0 1px 2px rgb(15 23 42 / 0.04),
+    0 4px 12px rgb(15 23 42 / 0.06),
+    0 24px 48px rgb(15 23 42 / 0.08);
+}
+
+.editor-canvas-paper:focus-within {
+  @apply ring-2 ring-slate-900/10 ring-offset-2 ring-offset-white;
+}
+
+.editor-canvas-paper .ProseMirror {
+  @apply text-[15px] leading-relaxed text-slate-800 antialiased;
+  min-height: min(70vh, 900px);
+}
+
+.editor-canvas-paper .ProseMirror ::selection {
+  background-color: rgb(191 219 254 / 0.85);
+}
+
 .ProseMirror table {
   @apply w-full table-fixed border-collapse border border-gray-300;
 }
@@ -54,4 +82,14 @@ body {
 
 .ProseMirror mark {
   @apply rounded px-0.5;
+}
+
+.ProseMirror .comment-mark {
+  @apply rounded bg-amber-200/80 px-0.5;
+}
+
+.editor-canvas-paper .ProseMirror h1,
+.editor-canvas-paper .ProseMirror h2,
+.editor-canvas-paper .ProseMirror h3 {
+  @apply tracking-tight text-slate-900;
 }

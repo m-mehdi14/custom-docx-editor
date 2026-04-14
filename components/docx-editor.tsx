@@ -1,7 +1,8 @@
 "use client";
 
 import type { Editor } from "@tiptap/core";
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import BubbleMenuExtension from "@tiptap/extension-bubble-menu";
 import {
   AlignCenter,
   AlignJustify,
@@ -12,6 +13,7 @@ import {
   Code2,
   CornerDownLeft,
   Eraser,
+  FileText,
   Heading1,
   Heading2,
   Heading3,
@@ -22,7 +24,9 @@ import {
   List,
   ListOrdered,
   Merge,
+  MessageSquarePlus,
   Minus,
+  Pencil,
   Pilcrow,
   Quote,
   Redo2,
@@ -40,6 +44,7 @@ import {
 } from "lucide-react";
 import { saveAs } from "file-saver";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
+import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
 import { Table } from "@tiptap/extension-table";
 import TableRow from "@tiptap/extension-table-row";
@@ -54,12 +59,28 @@ import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
 
 import { importDocx, exportDocx } from "@/lib/docx";
+import { CommentMark } from "@/extensions/comment-mark";
 import type { EditorState } from "@/types/editor";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 const EMPTY_CONTENT = "<p>Upload a DOCX file to start editing.</p>";
 const HIGHLIGHT_COLORS = ["#fef08a", "#bfdbfe", "#bbf7d0", "#fecaca", "#e9d5ff"];
+
+interface CommentItem {
+  id: string;
+  text: string;
+  resolved: boolean;
+  createdAt: string;
+}
 
 function getBlockTextAlign(editor: Editor | null): "left" | "center" | "right" | "justify" {
   if (!editor) return "left";
@@ -67,6 +88,22 @@ function getBlockTextAlign(editor: Editor | null): "left" | "center" | "right" |
   const ta = node.attrs.textAlign as string | undefined;
   if (ta === "center" || ta === "right" || ta === "justify" || ta === "left") return ta;
   return "left";
+}
+
+function findCommentPosition(editor: Editor, commentId: string): number | null {
+  let foundPos: number | null = null;
+  editor.state.doc.descendants((node, pos) => {
+    if (foundPos !== null || !node.isText) return false;
+    const hasComment = node.marks.some(
+      (mark) => mark.type.name === "comment" && mark.attrs.commentId === commentId,
+    );
+    if (hasComment) {
+      foundPos = pos;
+      return false;
+    }
+    return true;
+  });
+  return foundPos;
 }
 
 function ToolbarButton({
@@ -109,6 +146,13 @@ export function DocxEditor() {
     fileName: "untitled.docx",
   });
   const [error, setError] = useState<string>("");
+  const [comments, setComments] = useState<CommentItem[]>([]);
+  const [activeCommentId, setActiveCommentId] = useState<string>("");
+  const [commentDialogOpen, setCommentDialogOpen] = useState(false);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [commentDialogMode, setCommentDialogMode] = useState<"add" | "edit">("add");
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
+  const pendingSelectionRef = useRef<{ from: number; to: number } | null>(null);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -131,6 +175,8 @@ export function DocxEditor() {
       Highlight.configure({
         multicolor: true,
       }),
+      CommentMark,
+      BubbleMenuExtension,
       Subscript,
       Superscript,
       Table.configure({
@@ -155,8 +201,10 @@ export function DocxEditor() {
       isUnderline: currentEditor?.isActive("underline") ?? false,
       isCode: currentEditor?.isActive("code") ?? false,
       isLink: currentEditor?.isActive("link") ?? false,
+      isCommentMark: currentEditor?.isActive("comment") ?? false,
       isHighlight: currentEditor?.isActive("highlight") ?? false,
       highlightColor: (currentEditor?.getAttributes("highlight").color as string) ?? "",
+      selectedCommentId: (currentEditor?.getAttributes("comment").commentId as string) ?? "",
       isSubscript: currentEditor?.isActive("subscript") ?? false,
       isSuperscript: currentEditor?.isActive("superscript") ?? false,
       isBulletList: currentEditor?.isActive("bulletList") ?? false,
@@ -185,8 +233,10 @@ export function DocxEditor() {
     isUnderline: false,
     isCode: false,
     isLink: false,
+    isCommentMark: false,
     isHighlight: false,
     highlightColor: "",
+    selectedCommentId: "",
     isSubscript: false,
     isSuperscript: false,
     isBulletList: false,
@@ -207,6 +257,12 @@ export function DocxEditor() {
     canMergeCells: false,
     canSplitCell: false,
   };
+
+  useEffect(() => {
+    if (currentToolbarState.selectedCommentId) {
+      setActiveCommentId(currentToolbarState.selectedCommentId);
+    }
+  }, [currentToolbarState.selectedCommentId]);
 
   const setProcessing = (value: boolean) => {
     setEditorState((prev) => ({
@@ -231,6 +287,8 @@ export function DocxEditor() {
         content: html || EMPTY_CONTENT,
         fileName: file.name,
       }));
+      setComments([]);
+      setActiveCommentId("");
     } catch {
       setError("Could not import DOCX. Try a different file.");
     } finally {
@@ -282,11 +340,123 @@ export function DocxEditor() {
     editor?.chain().focus().unsetHighlight().run();
   };
 
+  const openAddCommentDialog = () => {
+    if (!editor) return;
+    const { from, to } = editor.state.selection;
+    if (from === to) {
+      setError("Select text before adding a comment.");
+      return;
+    }
+    pendingSelectionRef.current = { from, to };
+    setCommentDialogMode("add");
+    setEditingCommentId(null);
+    setCommentDraft("");
+    setCommentDialogOpen(true);
+    setError("");
+  };
+
+  const openEditCommentDialog = (commentId: string) => {
+    const comment = comments.find((item) => item.id === commentId);
+    if (!comment) return;
+    pendingSelectionRef.current = null;
+    setCommentDialogMode("edit");
+    setEditingCommentId(commentId);
+    setCommentDraft(comment.text);
+    setCommentDialogOpen(true);
+  };
+
+  const handleCommentDialogSubmit = () => {
+    const text = commentDraft.trim();
+    if (!text) return;
+
+    if (commentDialogMode === "add") {
+      if (!editor || !pendingSelectionRef.current) return;
+      const { from, to } = pendingSelectionRef.current;
+      const id = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`).toString();
+      editor.chain().focus().setTextSelection({ from, to }).setComment(id).run();
+      setComments((prev) => [
+        {
+          id,
+          text,
+          resolved: false,
+          createdAt: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+      setActiveCommentId(id);
+      pendingSelectionRef.current = null;
+    } else if (editingCommentId) {
+      setComments((prev) =>
+        prev.map((item) => (item.id === editingCommentId ? { ...item, text } : item)),
+      );
+    }
+
+    setCommentDialogOpen(false);
+    setCommentDraft("");
+    setEditingCommentId(null);
+    setError("");
+  };
+
+  const handleCommentDialogOpenChange = (open: boolean) => {
+    setCommentDialogOpen(open);
+    if (!open) {
+      pendingSelectionRef.current = null;
+      setCommentDraft("");
+      setEditingCommentId(null);
+    }
+  };
+
+  const handleJumpToComment = (commentId: string) => {
+    if (!editor) return;
+    const pos = findCommentPosition(editor, commentId);
+    if (pos === null) return;
+    editor.chain().focus().setTextSelection(pos).run();
+    setActiveCommentId(commentId);
+  };
+
+  const handleToggleResolved = (commentId: string) => {
+    setComments((prev) =>
+      prev.map((item) => (item.id === commentId ? { ...item, resolved: !item.resolved } : item)),
+    );
+  };
+
+  const handleDeleteComment = (commentId: string) => {
+    if (!editor) return;
+    const { state } = editor;
+    let tr = state.tr;
+    let changed = false;
+    state.doc.descendants((node, pos) => {
+      if (!node.isText) return true;
+      node.marks.forEach((mark) => {
+        if (mark.type.name === "comment" && mark.attrs.commentId === commentId) {
+          tr = tr.removeMark(pos, pos + node.nodeSize, mark.type);
+          changed = true;
+        }
+      });
+      return true;
+    });
+    if (changed) {
+      editor.view.dispatch(tr);
+    }
+    setComments((prev) => prev.filter((item) => item.id !== commentId));
+    if (activeCommentId === commentId) {
+      setActiveCommentId("");
+    }
+  };
+
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-6 md:px-8">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3">
-        <p className="text-sm font-medium text-slate-700">{editorState.fileName}</p>
-        <div className="flex items-center gap-2">
+    <div className="mx-auto flex w-full max-w-[1360px] flex-1 flex-col gap-5 px-4 pb-10 pt-4 sm:px-6 lg:px-10">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white px-4 py-3.5 shadow-sm shadow-slate-200/40 sm:px-5">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+            <FileText className="size-5" />
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-slate-900">{editorState.fileName}</p>
+            <p className="text-xs text-slate-500">DOCX · Export keeps structure (tables, headings, images)</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -298,6 +468,7 @@ export function DocxEditor() {
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={editorState.isProcessing}
+            className="border-slate-200"
           >
             <Upload className="mr-2 size-4" />
             Upload
@@ -309,7 +480,7 @@ export function DocxEditor() {
         </div>
       </div>
 
-      <div className="sticky top-3 z-10 flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3">
+      <div className="sticky top-3 z-10 flex flex-col gap-2 rounded-2xl border border-slate-200/80 bg-white/95 p-3 shadow-sm shadow-slate-200/40 backdrop-blur-md supports-backdrop-filter:bg-white/90">
         <div className="flex flex-wrap items-center gap-1.5">
           <ToolbarButton
             title="Undo"
@@ -652,16 +823,123 @@ export function DocxEditor() {
         </div>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-slate-100 p-4 md:p-6">
-        <div className="mx-auto min-h-[70vh] max-w-4xl bg-white p-8 shadow-sm">
-          <EditorContent editor={editor} className="prose prose-slate max-w-none" />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] lg:items-start">
+        <div className="editor-canvas p-4 sm:p-6 md:p-8 lg:p-10">
+          <div className="editor-canvas-paper relative mx-auto w-full max-w-[816px] px-5 py-8 sm:px-8 sm:py-10 md:px-12 md:py-14">
+            <EditorContent
+              editor={editor}
+              className="prose prose-slate max-w-none prose-headings:font-semibold prose-p:leading-relaxed"
+            />
+            {editor ? (
+              <BubbleMenu
+                editor={editor}
+                className="z-50 flex items-center gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-md"
+                shouldShow={({ editor: ed }) => !ed.state.selection.empty}
+              >
+                {currentToolbarState.isCommentMark ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => editor.chain().focus().unsetComment().run()}
+                  >
+                    Remove comment
+                  </Button>
+                ) : (
+                  <Button type="button" size="sm" onClick={openAddCommentDialog}>
+                    <MessageSquarePlus className="mr-1 size-4" />
+                    Comment
+                  </Button>
+                )}
+              </BubbleMenu>
+            ) : null}
+          </div>
         </div>
+        <aside className="lg:sticky lg:top-24 h-fit rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm shadow-slate-200/40">
+          <div className="mb-3 flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <h2 className="text-sm font-semibold text-slate-900">Comments</h2>
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+              {comments.length}
+            </span>
+          </div>
+          {comments.length === 0 ? (
+            <p className="text-xs leading-relaxed text-slate-500">
+              Select text in the document — the floating <strong className="font-medium text-slate-700">Comment</strong>{" "}
+              button appears above your selection.
+            </p>
+          ) : (
+            <div className="flex max-h-[min(70vh,560px)] flex-col gap-2 overflow-y-auto pr-1">
+              {comments.map((comment) => (
+                <div
+                  key={comment.id}
+                  className={cn(
+                    "rounded-xl border p-3 transition-colors",
+                    comment.resolved && "opacity-60",
+                    activeCommentId === comment.id ? "border-slate-900 bg-slate-50" : "border-slate-200/90 bg-slate-50/30",
+                  )}
+                >
+                  <button
+                    type="button"
+                    className="w-full text-left text-sm leading-snug text-slate-800"
+                    onClick={() => handleJumpToComment(comment.id)}
+                  >
+                    {comment.text}
+                  </button>
+                  <p className="mt-2 text-[11px] text-slate-500">
+                    {new Date(comment.createdAt).toLocaleString()}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    <Button size="sm" variant="outline" onClick={() => openEditCommentDialog(comment.id)}>
+                      <Pencil className="size-3.5" />
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleToggleResolved(comment.id)}>
+                      {comment.resolved ? "Unresolve" : "Resolve"}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => handleDeleteComment(comment.id)}>
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </aside>
       </div>
 
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
-      <p className="text-xs text-slate-500">
+      {error ? (
+        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+      ) : null}
+      <p className="text-center text-xs leading-relaxed text-slate-400">
         Complex nested tables and merged cells may not round-trip perfectly.
       </p>
+
+      <Dialog open={commentDialogOpen} onOpenChange={handleCommentDialogOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{commentDialogMode === "add" ? "Add comment" : "Edit comment"}</DialogTitle>
+            <DialogDescription>
+              {commentDialogMode === "add"
+                ? "Comments appear in the sidebar and stay linked to the selected text."
+                : "Update the text stored for this comment."}
+            </DialogDescription>
+          </DialogHeader>
+          <textarea
+            className="min-h-[120px] w-full resize-y rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none ring-slate-300 focus:ring-2"
+            value={commentDraft}
+            onChange={(event) => setCommentDraft(event.target.value)}
+            placeholder="Write a comment…"
+            autoFocus
+          />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => handleCommentDialogOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleCommentDialogSubmit}>
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
