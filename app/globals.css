@@ -65,13 +65,24 @@ body {
   background-color: rgb(191 219 254 / 0.85);
 }
 
+.editor-canvas-paper .ProseMirror .tableWrapper {
+  margin: 1rem 0;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .ProseMirror table {
-  @apply w-full table-fixed border-collapse border border-gray-300;
+  @apply w-full table-fixed border-collapse border border-slate-300;
 }
 
 .ProseMirror td,
 .ProseMirror th {
-  @apply relative min-w-[1em] border border-gray-300 p-2;
+  @apply relative min-w-[2em] border border-slate-300 p-2 align-top;
+}
+
+.ProseMirror th {
+  @apply bg-slate-50 font-semibold text-slate-900;
 }
 
 .ProseMirror img {

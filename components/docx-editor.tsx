@@ -9,13 +9,18 @@ import {
   AlignLeft,
   AlignRight,
   ArrowDownToLine,
+  ArrowLeftToLine,
   ArrowRightToLine,
+  ArrowUpToLine,
   Ban,
   Bold,
+  ChevronLeft,
+  ChevronRight,
   Code,
   Code2,
   CornerDownLeft,
   FileText,
+  Grid2x2,
   Heading1,
   Heading2,
   Heading3,
@@ -28,6 +33,8 @@ import {
   Merge,
   MessageSquarePlus,
   Minus,
+  LayoutPanelLeft,
+  LayoutPanelTop,
   Pencil,
   Pilcrow,
   Quote,
@@ -55,6 +62,7 @@ import TableRow from "@tiptap/extension-table-row";
 import TableHeader from "@tiptap/extension-table-header";
 import TableCell from "@tiptap/extension-table-cell";
 import Image from "@tiptap/extension-image";
+import { FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import TextAlign from "@tiptap/extension-text-align";
 import Highlight from "@tiptap/extension-highlight";
 import Subscript from "@tiptap/extension-subscript";
@@ -76,6 +84,37 @@ import { cn } from "@/lib/utils";
 
 const EMPTY_CONTENT = "<p></p>";
 const HIGHLIGHT_COLORS = ["#fef08a", "#bfdbfe", "#bbf7d0", "#fecaca", "#e9d5ff"];
+const INSERT_TABLE_MAX = 10;
+
+const FONT_FAMILIES: { label: string; value: string }[] = [
+  { label: "Default", value: "" },
+  { label: "Arial", value: "Arial, Helvetica, sans-serif" },
+  { label: "Calibri", value: "Calibri, Candara, Segoe, sans-serif" },
+  { label: "Cambria", value: "Cambria, Georgia, serif" },
+  { label: "Georgia", value: "Georgia, serif" },
+  { label: "Times New Roman", value: '"Times New Roman", Times, serif' },
+  { label: "Verdana", value: "Verdana, Geneva, sans-serif" },
+  { label: "Trebuchet MS", value: '"Trebuchet MS", Helvetica, sans-serif' },
+  { label: "Courier New", value: '"Courier New", Courier, monospace' },
+  { label: "Consolas", value: "Consolas, Monaco, monospace" },
+];
+
+const FONT_SIZES: { label: string; value: string }[] = [
+  { label: "Default", value: "" },
+  { label: "8 pt", value: "8pt" },
+  { label: "9 pt", value: "9pt" },
+  { label: "10 pt", value: "10pt" },
+  { label: "11 pt", value: "11pt" },
+  { label: "12 pt", value: "12pt" },
+  { label: "14 pt", value: "14pt" },
+  { label: "16 pt", value: "16pt" },
+  { label: "18 pt", value: "18pt" },
+  { label: "20 pt", value: "20pt" },
+  { label: "24 pt", value: "24pt" },
+  { label: "28 pt", value: "28pt" },
+  { label: "36 pt", value: "36pt" },
+  { label: "48 pt", value: "48pt" },
+];
 
 interface CommentItem {
   id: string;
@@ -90,6 +129,15 @@ function getBlockTextAlign(editor: Editor | null): "left" | "center" | "right" |
   const ta = node.attrs.textAlign as string | undefined;
   if (ta === "center" || ta === "right" || ta === "justify" || ta === "left") return ta;
   return "left";
+}
+
+function isCursorInTable(editor: Editor | null): boolean {
+  if (!editor) return false;
+  const { $anchor } = editor.state.selection;
+  for (let d = $anchor.depth; d > 0; d--) {
+    if ($anchor.node(d).type.name === "table") return true;
+  }
+  return false;
 }
 
 function findCommentPosition(editor: Editor, commentId: string): number | null {
@@ -143,7 +191,15 @@ function ToolbarButton({
   );
 }
 
-function ToolbarGroup({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
+function ToolbarCluster({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <div
       role="group"
@@ -154,6 +210,33 @@ function ToolbarGroup({ label, children, className }: { label: string; children:
       )}
     >
       {children}
+    </div>
+  );
+}
+
+function ToolbarSection({
+  title,
+  children,
+  bare = false,
+  clusterClassName,
+}: {
+  title: string;
+  children: ReactNode;
+  bare?: boolean;
+  clusterClassName?: string;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="select-none pl-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+        {title}
+      </span>
+      {bare ? (
+        children
+      ) : (
+        <ToolbarCluster label={title} className={clusterClassName}>
+          {children}
+        </ToolbarCluster>
+      )}
     </div>
   );
 }
@@ -173,6 +256,9 @@ export function DocxEditor() {
   const [commentDialogMode, setCommentDialogMode] = useState<"add" | "edit">("add");
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const pendingSelectionRef = useRef<{ from: number; to: number } | null>(null);
+  const [insertTableOpen, setInsertTableOpen] = useState(false);
+  const [insertTableHover, setInsertTableHover] = useState({ rows: 3, cols: 3 });
+  const [insertTableHeaderRow, setInsertTableHeaderRow] = useState(true);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -188,6 +274,9 @@ export function DocxEditor() {
           },
         },
       }),
+      TextStyle,
+      FontFamily,
+      FontSize,
       TextAlign.configure({
         types: ["heading", "paragraph"],
       }),
@@ -200,6 +289,7 @@ export function DocxEditor() {
       Superscript,
       Table.configure({
         resizable: true,
+        renderWrapper: true,
       }),
       TableRow,
       TableHeader,
@@ -237,12 +327,14 @@ export function DocxEditor() {
       isHeading5: currentEditor?.isActive("heading", { level: 5 }) ?? false,
       isHeading6: currentEditor?.isActive("heading", { level: 6 }) ?? false,
       isParagraph: currentEditor?.isActive("paragraph") ?? true,
-      inTable: currentEditor?.isActive("table") ?? false,
+      inTable: isCursorInTable(currentEditor ?? null),
       textAlign: getBlockTextAlign(currentEditor ?? null),
       canUndo: currentEditor?.can().chain().focus().undo().run() ?? false,
       canRedo: currentEditor?.can().chain().focus().redo().run() ?? false,
       canMergeCells: currentEditor?.can().chain().focus().mergeCells().run() ?? false,
       canSplitCell: currentEditor?.can().chain().focus().splitCell().run() ?? false,
+      fontFamily: (currentEditor?.getAttributes("textStyle").fontFamily as string | undefined) ?? "",
+      fontSize: (currentEditor?.getAttributes("textStyle").fontSize as string | undefined) ?? "",
     }),
   });
   const currentToolbarState = toolbarState ?? {
@@ -275,6 +367,8 @@ export function DocxEditor() {
     canRedo: false,
     canMergeCells: false,
     canSplitCell: false,
+    fontFamily: "",
+    fontSize: "",
   };
 
   const isPlaceholderDoc = useEditorState({
@@ -362,6 +456,34 @@ export function DocxEditor() {
 
   const handleClearHighlight = () => {
     editor?.chain().focus().unsetHighlight().run();
+  };
+
+  const handleFontFamilyChange = (value: string) => {
+    if (!editor) return;
+    const chain = editor.chain().focus();
+    if (value === "") chain.unsetFontFamily().run();
+    else chain.setFontFamily(value).run();
+  };
+
+  const handleFontSizeChange = (value: string) => {
+    if (!editor) return;
+    const chain = editor.chain().focus();
+    if (value === "") chain.unsetFontSize().run();
+    else chain.setFontSize(value).run();
+  };
+
+  const handleInsertTableDialogOpenChange = (open: boolean) => {
+    setInsertTableOpen(open);
+    if (open) {
+      setInsertTableHover({ rows: 3, cols: 3 });
+      setInsertTableHeaderRow(true);
+    }
+  };
+
+  const handleInsertTableFromPicker = (rows: number, cols: number) => {
+    if (!editor) return;
+    editor.chain().focus().insertTable({ rows, cols, withHeaderRow: insertTableHeaderRow }).run();
+    setInsertTableOpen(false);
   };
 
   const openAddCommentDialog = () => {
@@ -510,9 +632,9 @@ export function DocxEditor() {
         </div>
       </div>
 
-      <div className="sticky top-3 z-10 flex flex-col gap-2.5 rounded-2xl border border-slate-200/90 bg-white/95 p-3 shadow-[0_1px_0_0_rgb(15_23_42/0.05),0_12px_32px_-8px_rgb(15_23_42/0.12)] backdrop-blur-md supports-backdrop-filter:bg-white/90">
-        <div className="flex flex-wrap items-center gap-2">
-          <ToolbarGroup label="History">
+      <div className="sticky top-3 z-10 flex flex-col gap-3 rounded-2xl border border-slate-200/90 bg-white/95 p-3 shadow-[0_1px_0_0_rgb(15_23_42/0.05),0_12px_32px_-8px_rgb(15_23_42/0.12)] backdrop-blur-md supports-backdrop-filter:bg-white/90">
+        <div className="flex flex-wrap items-end gap-x-3 gap-y-2 sm:gap-x-4">
+          <ToolbarSection title="History">
             <ToolbarButton
               title="Undo"
               onClick={() => editor?.chain().focus().undo().run()}
@@ -527,9 +649,9 @@ export function DocxEditor() {
             >
               <Redo2 className="size-4" />
             </ToolbarButton>
-          </ToolbarGroup>
+          </ToolbarSection>
 
-          <ToolbarGroup label="Block style">
+          <ToolbarSection title="Headings">
             <ToolbarButton
               title="Paragraph"
               onClick={() => editor?.chain().focus().setParagraph().run()}
@@ -589,9 +711,9 @@ export function DocxEditor() {
             >
               H6
             </ToolbarButton>
-          </ToolbarGroup>
+          </ToolbarSection>
 
-          <ToolbarGroup label="Alignment">
+          <ToolbarSection title="Align">
             <ToolbarButton
               title="Align left"
               onClick={() => editor?.chain().focus().setTextAlign("left").run()}
@@ -624,11 +746,58 @@ export function DocxEditor() {
             >
               <AlignJustify className="size-4" />
             </ToolbarButton>
-          </ToolbarGroup>
+          </ToolbarSection>
+
+          <ToolbarSection title="Font" clusterClassName="items-stretch gap-1.5 px-2 py-1">
+            <label htmlFor="toolbar-font-family" className="sr-only">
+              Font family
+            </label>
+            <select
+              id="toolbar-font-family"
+              disabled={!editor}
+              value={currentToolbarState.fontFamily || ""}
+              onChange={(e) => handleFontFamilyChange(e.target.value)}
+              className="h-9 max-w-42 min-w-32 rounded-lg border border-slate-200/80 bg-white px-2 text-sm text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:opacity-50"
+            >
+              {FONT_FAMILIES.map((f) => (
+                <option key={f.label + f.value} value={f.value}>
+                  {f.label}
+                </option>
+              ))}
+              {currentToolbarState.fontFamily &&
+              !FONT_FAMILIES.some((f) => f.value === currentToolbarState.fontFamily) ? (
+                <option value={currentToolbarState.fontFamily}>
+                  {currentToolbarState.fontFamily.length > 28
+                    ? `${currentToolbarState.fontFamily.slice(0, 28)}…`
+                    : currentToolbarState.fontFamily}
+                </option>
+              ) : null}
+            </select>
+            <label htmlFor="toolbar-font-size" className="sr-only">
+              Font size
+            </label>
+            <select
+              id="toolbar-font-size"
+              disabled={!editor}
+              value={currentToolbarState.fontSize || ""}
+              onChange={(e) => handleFontSizeChange(e.target.value)}
+              className="h-9 w-22 shrink-0 rounded-lg border border-slate-200/80 bg-white px-2 text-sm text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:opacity-50"
+            >
+              {FONT_SIZES.map((s) => (
+                <option key={s.label + s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+              {currentToolbarState.fontSize &&
+              !FONT_SIZES.some((s) => s.value === currentToolbarState.fontSize) ? (
+                <option value={currentToolbarState.fontSize}>{currentToolbarState.fontSize}</option>
+              ) : null}
+            </select>
+          </ToolbarSection>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <ToolbarGroup label="Text style">
+        <div className="flex flex-wrap items-end gap-x-3 gap-y-2 sm:gap-x-4">
+          <ToolbarSection title="Style">
             <ToolbarButton
               title="Bold"
               onClick={() => editor?.chain().focus().toggleBold().run()}
@@ -677,9 +846,9 @@ export function DocxEditor() {
             >
               <Link2 className="size-4" />
             </ToolbarButton>
-          </ToolbarGroup>
+          </ToolbarSection>
 
-          <ToolbarGroup label="Highlight">
+          <ToolbarSection title="Highlight">
             <ToolbarButton
               title="Toggle highlight"
               onClick={() => editor?.chain().focus().toggleHighlight().run()}
@@ -714,9 +883,9 @@ export function DocxEditor() {
             <ToolbarButton title="Clear highlight" onClick={handleClearHighlight} disabled={!editor}>
               <Ban className="size-4" />
             </ToolbarButton>
-          </ToolbarGroup>
+          </ToolbarSection>
 
-          <ToolbarGroup label="Script">
+          <ToolbarSection title="Script">
             <ToolbarButton
               title="Subscript"
               onClick={() => editor?.chain().focus().toggleSubscript().run()}
@@ -733,9 +902,9 @@ export function DocxEditor() {
             >
               <SuperscriptIcon className="size-4" />
             </ToolbarButton>
-          </ToolbarGroup>
+          </ToolbarSection>
 
-          <ToolbarGroup label="Blocks">
+          <ToolbarSection title="Blocks">
             <ToolbarButton
               title="Code block"
               onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
@@ -769,9 +938,9 @@ export function DocxEditor() {
             <ToolbarButton title="Clear formatting" onClick={handleClearFormatting} disabled={!editor}>
               <RemoveFormatting className="size-4" />
             </ToolbarButton>
-          </ToolbarGroup>
+          </ToolbarSection>
 
-          <ToolbarGroup label="Lists">
+          <ToolbarSection title="Lists">
             <ToolbarButton
               title="Bullet list"
               onClick={() => editor?.chain().focus().toggleBulletList().run()}
@@ -788,17 +957,26 @@ export function DocxEditor() {
             >
               <ListOrdered className="size-4" />
             </ToolbarButton>
-          </ToolbarGroup>
+          </ToolbarSection>
+        </div>
 
-          <ToolbarGroup label="Table">
+        <div className="flex flex-wrap items-end gap-x-3 gap-y-2 sm:gap-x-4">
+          <ToolbarSection title="Table" bare>
+            <div className="flex flex-wrap items-end gap-2">
+              <ToolbarCluster label="Insert and rows">
             <ToolbarButton
               title="Insert table"
-              onClick={() =>
-                editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
-              }
+              onClick={() => setInsertTableOpen(true)}
               disabled={!editor}
             >
               <Table2 className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              title="Add row above"
+              onClick={() => editor?.chain().focus().addRowBefore().run()}
+              disabled={!editor || !currentToolbarState.inTable}
+            >
+              <ArrowUpToLine className="size-4" />
             </ToolbarButton>
             <ToolbarButton
               title="Add row below"
@@ -815,6 +993,13 @@ export function DocxEditor() {
               <Trash2 className="size-4" />
             </ToolbarButton>
             <ToolbarButton
+              title="Add column before"
+              onClick={() => editor?.chain().focus().addColumnBefore().run()}
+              disabled={!editor || !currentToolbarState.inTable}
+            >
+              <ArrowLeftToLine className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
               title="Add column after"
               onClick={() => editor?.chain().focus().addColumnAfter().run()}
               disabled={!editor || !currentToolbarState.inTable}
@@ -828,6 +1013,33 @@ export function DocxEditor() {
             >
               <Scissors className="size-4" />
             </ToolbarButton>
+          </ToolbarCluster>
+
+          <ToolbarCluster label="Header style">
+            <ToolbarButton
+              title="Toggle header row"
+              onClick={() => editor?.chain().focus().toggleHeaderRow().run()}
+              disabled={!editor || !currentToolbarState.inTable}
+            >
+              <LayoutPanelTop className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              title="Toggle header column"
+              onClick={() => editor?.chain().focus().toggleHeaderColumn().run()}
+              disabled={!editor || !currentToolbarState.inTable}
+            >
+              <LayoutPanelLeft className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              title="Toggle header cell"
+              onClick={() => editor?.chain().focus().toggleHeaderCell().run()}
+              disabled={!editor || !currentToolbarState.inTable}
+            >
+              <Grid2x2 className="size-4" />
+            </ToolbarButton>
+          </ToolbarCluster>
+
+          <ToolbarCluster label="Cells">
             <ToolbarButton
               title="Merge cells"
               onClick={() => editor?.chain().focus().mergeCells().run()}
@@ -843,15 +1055,31 @@ export function DocxEditor() {
               <TableColumnsSplit className="size-4" />
             </ToolbarButton>
             <ToolbarButton
+              title="Previous cell"
+              onClick={() => editor?.chain().focus().goToPreviousCell().run()}
+              disabled={!editor || !currentToolbarState.inTable}
+            >
+              <ChevronLeft className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              title="Next cell"
+              onClick={() => editor?.chain().focus().goToNextCell().run()}
+              disabled={!editor || !currentToolbarState.inTable}
+            >
+              <ChevronRight className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
               title="Delete table"
               onClick={() => editor?.chain().focus().deleteTable().run()}
               disabled={!editor || !currentToolbarState.inTable}
             >
               <XCircle className="size-4" />
             </ToolbarButton>
-          </ToolbarGroup>
+          </ToolbarCluster>
+            </div>
+          </ToolbarSection>
 
-          <ToolbarGroup label="Media">
+          <ToolbarSection title="Insert">
             <ToolbarButton
               title="Insert image"
               onClick={() => {
@@ -864,7 +1092,7 @@ export function DocxEditor() {
             >
               <ImagePlus className="size-4" />
             </ToolbarButton>
-          </ToolbarGroup>
+          </ToolbarSection>
         </div>
       </div>
 
@@ -1005,6 +1233,69 @@ export function DocxEditor() {
             </Button>
             <Button type="button" onClick={handleCommentDialogSubmit}>
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={insertTableOpen} onOpenChange={handleInsertTableDialogOpenChange}>
+        <DialogContent className="max-w-md gap-5">
+          <DialogHeader>
+            <DialogTitle>Insert table</DialogTitle>
+            <DialogDescription>
+              Hover the grid to choose a size (up to {INSERT_TABLE_MAX}×{INSERT_TABLE_MAX}), then click a cell to insert.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="mx-auto w-fit rounded-xl border border-slate-200 bg-slate-50/90 p-2 shadow-inner">
+              <div
+                className="grid gap-0.5"
+                style={{ gridTemplateColumns: `repeat(${INSERT_TABLE_MAX}, minmax(0, 1fr))` }}
+              >
+                {Array.from({ length: INSERT_TABLE_MAX * INSERT_TABLE_MAX }).map((_, i) => {
+                  const row = Math.floor(i / INSERT_TABLE_MAX) + 1;
+                  const col = (i % INSERT_TABLE_MAX) + 1;
+                  const inSelection = row <= insertTableHover.rows && col <= insertTableHover.cols;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      aria-label={`Insert ${row} by ${col} table`}
+                      className={cn(
+                        "size-3.5 rounded-sm border transition-colors sm:size-4",
+                        inSelection
+                          ? "border-slate-900 bg-slate-900"
+                          : "border-slate-200/90 bg-white hover:bg-slate-100",
+                      )}
+                      onMouseEnter={() => setInsertTableHover({ rows: row, cols: col })}
+                      onClick={() => handleInsertTableFromPicker(row, col)}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+            <p className="text-center text-sm font-medium tabular-nums text-slate-700">
+              {insertTableHover.rows} × {insertTableHover.cols}
+            </p>
+            <label className="flex cursor-pointer items-center gap-2.5 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="size-4 rounded border-slate-300 accent-slate-900"
+                checked={insertTableHeaderRow}
+                onChange={(event) => setInsertTableHeaderRow(event.target.checked)}
+              />
+              Use header row
+            </label>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => handleInsertTableDialogOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={() => handleInsertTableFromPicker(insertTableHover.rows, insertTableHover.cols)}
+            >
+              Insert {insertTableHover.rows} × {insertTableHover.cols}
             </Button>
           </DialogFooter>
         </DialogContent>
