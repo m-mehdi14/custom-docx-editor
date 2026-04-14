@@ -2,28 +2,154 @@
 @plugin "@tailwindcss/typography";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --font-ui: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
+  --font-prose: var(--font-lora), Georgia, "Times New Roman", serif;
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-mono: var(--font-fira), "Cascadia Code", monospace;
+
+  /* Surfaces */
+  --c-canvas: #ede8df;
+  --c-paper: #fefcf5;
+  --c-chrome: #f5f0e6;
+  --c-chrome-glass: rgb(245 240 230 / 0.92);
+
+  /* Ink */
+  --c-ink: #1c1712;
+  --c-ink-muted: #6b5f52;
+  --c-ink-faint: #a89a8c;
+
+  /* Borders */
+  --c-border: #d6cec2;
+  --c-border-soft: #e8e0d5;
+
+  /* Accent — terracotta */
+  --c-accent: #c2410c;
+  --c-accent-dark: #9a330a;
+  --c-accent-tint: #fef0e7;
+
+  /* Semantic */
+  --c-comment: #fde68a;
+  --c-comment-bg: #fffbeb;
+  --c-select: rgb(194 65 12 / 0.12);
+  --c-error: #b91c1c;
+  --c-error-bg: #fef2f2;
+  --c-error-border: #fecaca;
+
+  /* Sticky offsets (header 52px + ~3-row toolbar) */
+  --app-header-h: 52px;
+  --app-sidebar-top: calc(52px + min(11rem, 28vh));
+
+  --background: var(--c-canvas);
+  --foreground: var(--c-ink);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@keyframes editorial-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
+@keyframes editorial-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes editorial-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes editorial-zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes editorial-paper-settle {
+  0% {
+    box-shadow:
+      0 0 0 3px rgb(194 65 12 / 0.15),
+      0 0 0 1px var(--c-border-soft),
+      0 2px 4px rgb(28 23 18 / 0.04),
+      0 8px 20px rgb(28 23 18 / 0.07),
+      0 32px 64px rgb(28 23 18 / 0.1),
+      0 64px 96px rgb(28 23 18 / 0.06);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1px var(--c-border-soft),
+      0 2px 4px rgb(28 23 18 / 0.04),
+      0 8px 20px rgb(28 23 18 / 0.07),
+      0 32px 64px rgb(28 23 18 / 0.1),
+      0 64px 96px rgb(28 23 18 / 0.06);
+  }
+}
+
+.editorial-head {
+  animation: editorial-fade-up 300ms ease both;
+}
+
+.editorial-toolbar {
+  animation: editorial-fade-up 300ms ease 80ms both;
+}
+
+.editorial-canvas-reveal {
+  animation: editorial-fade-up 300ms ease 160ms both;
+}
+
+.editorial-aside-reveal {
+  animation: editorial-fade-up 300ms ease 220ms both;
+}
+
+.editorial-error-banner {
+  animation: editorial-slide-down 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.editorial-drag-overlay {
+  animation: editorial-fade-in 80ms ease both;
+}
+
+.editorial-paper-settle {
+  animation: editorial-paper-settle 600ms ease-out both;
+}
+
+/* TipTap BubbleMenu is portaled — target via attribute */
+[data-tippy-root] .tippy-box,
+.tippy-box {
+  animation: editorial-fade-up 120ms ease both;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  background: var(--c-canvas);
+  color: var(--c-ink);
+  font-family: var(--font-ui);
 }
 
 .ProseMirror {
@@ -31,66 +157,154 @@ body {
   outline: none;
 }
 
+/* Linen canvas + subtle noise */
 .editor-canvas {
-  @apply rounded-2xl border border-slate-200/90;
-  background-color: rgb(241 245 249);
-  background-image:
-    radial-gradient(rgb(203 213 225 / 0.45) 1px, transparent 1px),
-    linear-gradient(180deg, rgb(248 250 252 / 0.5) 0%, transparent 50%);
-  background-size: 22px 22px, 100% 100%;
+  position: relative;
+  border-radius: 1rem;
+  border: 1px solid var(--c-border-soft);
+  background-color: var(--c-canvas);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+}
+
+/* Paper */
+.editor-canvas-paper {
+  border-radius: 2px;
+  border: 1px solid var(--c-border-soft);
+  background-color: var(--c-paper);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+  box-shadow:
+    0 0 0 1px var(--c-border-soft),
+    0 2px 4px rgb(28 23 18 / 0.04),
+    0 8px 20px rgb(28 23 18 / 0.07),
+    0 32px 64px rgb(28 23 18 / 0.1),
+    0 64px 96px rgb(28 23 18 / 0.06);
 }
 
 .editor-canvas-paper[data-placeholder="true"] .ProseMirror {
-  min-height: min(52vh, 640px);
-}
-
-.editor-canvas-paper {
-  @apply rounded-sm border border-slate-200/70 bg-white;
-  box-shadow:
-    0 1px 2px rgb(15 23 42 / 0.04),
-    0 4px 12px rgb(15 23 42 / 0.06),
-    0 24px 48px rgb(15 23 42 / 0.08);
+  min-height: min(52vh, 680px);
 }
 
 .editor-canvas-paper:focus-within {
-  @apply ring-2 ring-slate-900/10 ring-offset-2 ring-offset-white;
+  outline: none;
+  box-shadow:
+    0 0 0 1px rgb(194 65 12 / 0.2),
+    0 0 0 3px var(--c-canvas),
+    0 2px 4px rgb(28 23 18 / 0.04),
+    0 8px 20px rgb(28 23 18 / 0.07),
+    0 32px 64px rgb(28 23 18 / 0.1),
+    0 64px 96px rgb(28 23 18 / 0.06);
 }
 
 .editor-canvas-paper .ProseMirror {
-  @apply text-[15px] leading-relaxed text-slate-800 antialiased;
-  min-height: min(70vh, 900px);
+  font-family: var(--font-prose);
+  font-size: 16px;
+  line-height: 1.75;
+  color: var(--c-ink);
+  min-height: min(70vh, 960px);
+  -webkit-font-smoothing: antialiased;
 }
 
 .editor-canvas-paper .ProseMirror ::selection {
-  background-color: rgb(191 219 254 / 0.85);
+  background: var(--c-select);
 }
 
 .editor-canvas-paper .ProseMirror .tableWrapper {
-  margin: 1rem 0;
+  margin: 1.5rem 0;
   max-width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
 
 .ProseMirror table {
-  @apply w-full table-fixed border-collapse border border-slate-300;
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--c-border);
+  table-layout: fixed;
 }
 
 .ProseMirror td,
 .ProseMirror th {
-  @apply relative min-w-[2em] border border-slate-300 p-2 align-top;
+  position: relative;
+  min-width: 2em;
+  border: 1px solid var(--c-border);
+  padding: 0.5rem 0.75rem;
+  vertical-align: top;
 }
 
 .ProseMirror th {
-  @apply bg-slate-50 font-semibold text-slate-900;
+  background: var(--c-accent-tint);
+  font-family: var(--font-ui);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--c-ink);
 }
 
 .ProseMirror img {
-  @apply h-auto max-w-full rounded-md;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgb(28 23 18 / 0.12);
+}
+
+/* Figures (image + caption) */
+.editor-canvas-paper .ProseMirror figure.editor-figure {
+  margin: 1.75rem auto;
+  max-width: 100%;
+  text-align: center;
+}
+
+.editor-canvas-paper .ProseMirror figure.editor-figure .editor-figure__img {
+  display: block;
+  margin-inline: auto;
+  max-width: 100%;
+  height: auto;
+}
+
+.editor-canvas-paper .ProseMirror figure.editor-figure .editor-figure__caption {
+  margin-top: 0.65rem;
+  font-family: var(--font-ui);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--c-ink-muted);
+  font-style: italic;
+  text-align: center;
+}
+
+/* Inline charts (SVG) */
+.editor-canvas-paper .ProseMirror figure.editor-chart {
+  margin: 1.75rem auto;
+  max-width: 100%;
+  text-align: center;
+}
+
+.editor-canvas-paper .ProseMirror .editor-chart__inner {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+}
+
+.editor-canvas-paper .ProseMirror .editor-chart__svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.editor-canvas-paper .ProseMirror .editor-chart__caption {
+  margin-top: 0.65rem;
+  font-size: 0.875rem;
+  color: var(--c-ink-muted);
+  font-style: italic;
+  font-family: var(--font-ui);
 }
 
 .ProseMirror a {
-  @apply text-blue-600 underline underline-offset-2;
+  color: var(--c-accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .ProseMirror u {
@@ -98,15 +312,142 @@ body {
 }
 
 .ProseMirror mark {
-  @apply rounded px-0.5;
+  background: var(--c-comment);
+  border-radius: 3px;
+  padding: 0 2px;
 }
 
 .ProseMirror .comment-mark {
-  @apply rounded bg-amber-200/80 px-0.5;
+  background: var(--c-comment);
+  border-bottom: 1.5px solid #d97706;
+  border-radius: 2px;
+  padding: 0 2px;
 }
 
-.editor-canvas-paper .ProseMirror h1,
-.editor-canvas-paper .ProseMirror h2,
+.editor-canvas-paper .ProseMirror h1 {
+  font-family: var(--font-display);
+  font-size: 2.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--c-ink);
+}
+
+.editor-canvas-paper .ProseMirror h2 {
+  font-family: var(--font-display);
+  font-size: 1.625rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
 .editor-canvas-paper .ProseMirror h3 {
-  @apply tracking-tight text-slate-900;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--c-ink);
+}
+
+.editor-canvas-paper .ProseMirror h4 {
+  font-family: var(--font-prose);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--c-ink);
+}
+
+.editor-canvas-paper .ProseMirror h5 {
+  font-family: var(--font-prose);
+  font-size: 1rem;
+  font-weight: 700;
+  font-style: italic;
+  color: var(--c-ink);
+}
+
+.editor-canvas-paper .ProseMirror h6 {
+  font-family: var(--font-ui);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--c-ink-muted);
+}
+
+.editor-canvas-paper .ProseMirror blockquote {
+  border-left: 3px solid var(--c-accent);
+  padding-left: 1.25rem;
+  color: var(--c-ink-muted);
+  font-style: italic;
+}
+
+.editor-canvas-paper .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--c-border);
+  margin: 2rem 0;
+}
+
+.editor-canvas-paper .ProseMirror code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--c-accent-tint);
+  color: var(--c-accent);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.editor-canvas-paper .ProseMirror pre {
+  font-family: var(--font-mono);
+  background: var(--c-ink);
+  color: var(--c-paper);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  font-size: 0.875rem;
+}
+
+.editor-canvas-paper .ProseMirror pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+/* Toolbar button micro-interaction */
+.toolbar-btn {
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 80ms ease;
+}
+
+.toolbar-btn:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+/* Single-row formatting toolbar (Google Docs–style horizontal strip) */
+.editorial-toolbar [role="toolbar"] {
+  scrollbar-color: var(--c-border) transparent;
+}
+
+.editorial-toolbar [role="toolbar"]::-webkit-scrollbar {
+  height: 6px;
+}
+
+.editorial-toolbar [role="toolbar"]::-webkit-scrollbar-thumb {
+  background: var(--c-border);
+  border-radius: 999px;
+}
+
+@keyframes editorial-dialog-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.dialog-editorial-content[data-state="open"] {
+  animation: editorial-dialog-in 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.dialog-editorial-content[data-state="closed"] {
+  animation: none;
 }

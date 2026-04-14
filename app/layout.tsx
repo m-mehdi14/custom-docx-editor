@@ -1,15 +1,29 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Fraunces, Fira_Code, Instrument_Sans, Lora } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const fontInstrument = Instrument_Sans({
   subsets: ["latin"],
+  variable: "--font-instrument",
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const fontLora = Lora({
   subsets: ["latin"],
+  variable: "--font-lora",
+  display: "swap",
+});
+
+const fontFraunces = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-fraunces",
+  display: "swap",
+});
+
+const fontFira = Fira_Code({
+  subsets: ["latin"],
+  variable: "--font-fira",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -25,9 +39,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${fontInstrument.variable} ${fontLora.variable} ${fontFraunces.variable} ${fontFira.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">
+      <body className="min-h-full flex flex-col bg-[var(--c-canvas)] text-[var(--c-ink)]">
         {children}
       </body>
     </html>

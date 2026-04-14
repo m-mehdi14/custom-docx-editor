@@ -22,7 +22,7 @@ const DialogOverlay = forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 z-50 bg-black/40", className)}
+    className={cn("fixed inset-0 z-50 bg-[rgba(28,23,18,0.45)] backdrop-blur-sm", className)}
     {...props}
   />
 ));
@@ -37,14 +37,14 @@ const DialogContent = forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border border-slate-200 bg-white p-6 shadow-lg",
+        "dialog-editorial-content fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border border-[var(--c-border-soft)] bg-[var(--c-paper)] p-6 font-[family-name:var(--font-ui)] shadow-[0_16px_64px_rgba(28,23,18,0.2)]",
         className,
       )}
       {...props}
     >
       {children}
       <DialogPrimitive.Close
-        className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-white transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-slate-300"
+        className="absolute right-4 top-4 rounded-sm text-[var(--c-ink-muted)] opacity-70 ring-offset-[var(--c-paper)] transition-opacity hover:opacity-100 focus:outline-none focus:ring-1 focus:ring-[var(--c-accent)]"
         aria-label="Close"
       >
         <X className="size-4" />
@@ -66,7 +66,11 @@ const DialogTitle = forwardRef<
   ElementRef<typeof DialogPrimitive.Title>,
   ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Title ref={ref} className={cn("text-lg font-semibold text-slate-900", className)} {...props} />
+  <DialogPrimitive.Title
+    ref={ref}
+    className={cn("font-[family-name:var(--font-display)] text-xl font-semibold text-[var(--c-ink)]", className)}
+    {...props}
+  />
 ));
 DialogTitle.displayName = DialogPrimitive.Title.displayName;
 
@@ -74,7 +78,11 @@ const DialogDescription = forwardRef<
   ElementRef<typeof DialogPrimitive.Description>,
   ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Description ref={ref} className={cn("text-sm text-slate-500", className)} {...props} />
+  <DialogPrimitive.Description
+    ref={ref}
+    className={cn("mt-1 text-sm leading-relaxed text-[var(--c-ink-muted)]", className)}
+    {...props}
+  />
 ));
 DialogDescription.displayName = DialogPrimitive.Description.displayName;
 

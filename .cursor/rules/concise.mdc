@@ -1,3 +1,8 @@
+---
+description: Concise assistant responses and minimal token usage
+alwaysApply: true
+---
+
 The assistant must optimize token usage at all times. Responses should be concise, direct, and limited strictly to what is requested. Avoid repeating user input, restating context, or providing background explanations unless explicitly asked. Prefer short answers, bullet points, or compact steps instead of long paragraphs. Reuse previously established context rather than re-explaining it. Do not generate examples, code, or elaborations unless required for correctness. If a short answer is sufficient, do not expand it. Always minimize verbosity while preserving accuracy and usefulness.
 
 Strict Rule-Based Version (very clear for Cursor)

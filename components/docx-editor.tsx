@@ -1,7 +1,7 @@
 "use client";
 
 import type { Editor } from "@tiptap/core";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type DragEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import BubbleMenuExtension from "@tiptap/extension-bubble-menu";
 import {
   AlignCenter,
@@ -17,26 +17,24 @@ import {
   ChevronLeft,
   ChevronRight,
   Code,
+  ChartColumn,
   Code2,
   CornerDownLeft,
-  FileText,
+  Frame,
   Grid2x2,
-  Heading1,
-  Heading2,
-  Heading3,
   Highlighter,
   ImagePlus,
   Italic,
   Link2,
   List,
   ListOrdered,
+  Loader2,
   Merge,
   MessageSquarePlus,
   Minus,
   LayoutPanelLeft,
   LayoutPanelTop,
   Pencil,
-  Pilcrow,
   Quote,
   Redo2,
   RemoveFormatting,
@@ -69,7 +67,9 @@ import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
 
 import { importDocx, exportDocx } from "@/lib/docx";
+import { ChartBlock } from "@/extensions/chart-block";
 import { CommentMark } from "@/extensions/comment-mark";
+import { Figure } from "@/extensions/figure";
 import type { EditorState } from "@/types/editor";
 import { Button } from "@/components/ui/button";
 import {
@@ -83,20 +83,26 @@ import {
 import { cn } from "@/lib/utils";
 
 const EMPTY_CONTENT = "<p></p>";
-const HIGHLIGHT_COLORS = ["#fef08a", "#bfdbfe", "#bbf7d0", "#fecaca", "#e9d5ff"];
+const HIGHLIGHT_COLORS = [
+  { hex: "#FDE68A", label: "warm amber" },
+  { hex: "#BFDBFE", label: "sky blue" },
+  { hex: "#BBF7D0", label: "mint" },
+  { hex: "#FECACA", label: "rose" },
+  { hex: "#E9D5FF", label: "lavender" },
+];
 const INSERT_TABLE_MAX = 10;
 
 const FONT_FAMILIES: { label: string; value: string }[] = [
   { label: "Default", value: "" },
-  { label: "Arial", value: "Arial, Helvetica, sans-serif" },
-  { label: "Calibri", value: "Calibri, Candara, Segoe, sans-serif" },
-  { label: "Cambria", value: "Cambria, Georgia, serif" },
+  { label: "Lora", value: "var(--font-lora), Georgia, serif" },
+  { label: "Fraunces", value: "var(--font-fraunces), Georgia, serif" },
   { label: "Georgia", value: "Georgia, serif" },
   { label: "Times New Roman", value: '"Times New Roman", Times, serif' },
+  { label: "Cambria", value: "Cambria, Georgia, serif" },
   { label: "Verdana", value: "Verdana, Geneva, sans-serif" },
   { label: "Trebuchet MS", value: '"Trebuchet MS", Helvetica, sans-serif' },
   { label: "Courier New", value: '"Courier New", Courier, monospace' },
-  { label: "Consolas", value: "Consolas, Monaco, monospace" },
+  { label: "Fira Code", value: "var(--font-fira), monospace" },
 ];
 
 const FONT_SIZES: { label: string; value: string }[] = [
@@ -140,20 +146,30 @@ function isCursorInTable(editor: Editor | null): boolean {
   return false;
 }
 
-function findCommentPosition(editor: Editor, commentId: string): number | null {
-  let foundPos: number | null = null;
+function findCommentRange(editor: Editor, commentId: string): { from: number; to: number } | null {
+  let from: number | null = null;
+  let to: number | null = null;
   editor.state.doc.descendants((node, pos) => {
-    if (foundPos !== null || !node.isText) return false;
-    const hasComment = node.marks.some(
-      (mark) => mark.type.name === "comment" && mark.attrs.commentId === commentId,
+    if (!node.isText) return true;
+    const mark = node.marks.find(
+      (m) => m.type.name === "comment" && m.attrs.commentId === commentId,
     );
-    if (hasComment) {
-      foundPos = pos;
-      return false;
+    if (mark) {
+      const textLen = node.text?.length ?? 0;
+      const start = pos;
+      const end = pos + textLen;
+      if (from === null || to === null) {
+        from = start;
+        to = end;
+      } else {
+        from = Math.min(from, start);
+        to = Math.max(to, end);
+      }
     }
     return true;
   });
-  return foundPos;
+  if (from === null || to === null) return null;
+  return { from, to };
 }
 
 function ToolbarButton({
@@ -179,8 +195,10 @@ function ToolbarButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "h-9 w-9 shrink-0 rounded-lg text-slate-600 hover:bg-slate-200/80 hover:text-slate-900",
-        active && "bg-slate-900 text-white hover:bg-slate-800 hover:text-white",
+        "toolbar-btn h-8 w-8 min-w-8 shrink-0 rounded-md text-[var(--c-ink-muted)] hover:bg-[var(--c-accent-tint)] hover:text-[var(--c-accent)]",
+        disabled && "pointer-events-none opacity-30",
+        active &&
+          "bg-[var(--c-accent)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.15)] hover:bg-[var(--c-accent-dark)] hover:text-white",
         className,
       )}
       title={title}
@@ -191,6 +209,27 @@ function ToolbarButton({
   );
 }
 
+function ToolbarDivider() {
+  return <span className="mx-1.5 h-7 w-px shrink-0 bg-[var(--c-border)]/80" aria-hidden />;
+}
+
+function ToolbarGroup({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div role="group" aria-label={label} className={cn("flex shrink-0 items-center gap-0.5", className)}>
+      {children}
+    </div>
+  );
+}
+
+/** Flat cluster (Google Docs–style: no boxed border, no label row). */
 function ToolbarCluster({
   label,
   children,
@@ -201,16 +240,9 @@ function ToolbarCluster({
   className?: string;
 }) {
   return (
-    <div
-      role="group"
-      aria-label={label}
-      className={cn(
-        "flex flex-wrap items-center gap-0.5 rounded-xl border border-slate-200/80 bg-slate-50/90 p-1 shadow-[inset_0_1px_0_0_rgb(255_255_255/0.6)]",
-        className,
-      )}
-    >
+    <ToolbarGroup label={label} className={className}>
       {children}
-    </div>
+    </ToolbarGroup>
   );
 }
 
@@ -225,20 +257,27 @@ function ToolbarSection({
   bare?: boolean;
   clusterClassName?: string;
 }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <span className="select-none pl-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
-        {title}
-      </span>
-      {bare ? (
-        children
-      ) : (
-        <ToolbarCluster label={title} className={clusterClassName}>
-          {children}
-        </ToolbarCluster>
-      )}
-    </div>
-  );
+  if (bare) {
+    return <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">{children}</div>;
+  }
+  return <ToolbarCluster label={title} className={clusterClassName}>{children}</ToolbarCluster>;
+}
+
+function getBlockTypeSelectValue(s: {
+  isHeading1: boolean;
+  isHeading2: boolean;
+  isHeading3: boolean;
+  isHeading4: boolean;
+  isHeading5: boolean;
+  isHeading6: boolean;
+}): string {
+  if (s.isHeading1) return "h1";
+  if (s.isHeading2) return "h2";
+  if (s.isHeading3) return "h3";
+  if (s.isHeading4) return "h4";
+  if (s.isHeading5) return "h5";
+  if (s.isHeading6) return "h6";
+  return "paragraph";
 }
 
 export function DocxEditor() {
@@ -259,6 +298,21 @@ export function DocxEditor() {
   const [insertTableOpen, setInsertTableOpen] = useState(false);
   const [insertTableHover, setInsertTableHover] = useState({ rows: 3, cols: 3 });
   const [insertTableHeaderRow, setInsertTableHeaderRow] = useState(true);
+  const [imageDialogOpen, setImageDialogOpen] = useState(false);
+  const [imageUrlDraft, setImageUrlDraft] = useState("");
+  const [dragOverCanvas, setDragOverCanvas] = useState(false);
+  const [paperPulse, setPaperPulse] = useState(false);
+  const canvasDropRef = useRef<HTMLDivElement>(null);
+  const [figureDialogOpen, setFigureDialogOpen] = useState(false);
+  const [figureUrlDraft, setFigureUrlDraft] = useState("");
+  const [figureAltDraft, setFigureAltDraft] = useState("");
+  const [figureCaptionDraft, setFigureCaptionDraft] = useState("");
+  const [chartDialogOpen, setChartDialogOpen] = useState(false);
+  const [chartTitleDraft, setChartTitleDraft] = useState("");
+  const [chartTypeDraft, setChartTypeDraft] = useState<"bar" | "line">("bar");
+  const [chartLabelsDraft, setChartLabelsDraft] = useState("Q1,Q2,Q3,Q4");
+  const [chartValuesDraft, setChartValuesDraft] = useState("12,19,14,22");
+  const [chartCaptionDraft, setChartCaptionDraft] = useState("");
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -270,7 +324,7 @@ export function DocxEditor() {
         link: {
           openOnClick: false,
           HTMLAttributes: {
-            class: "text-blue-600 underline underline-offset-2",
+            class: "text-[var(--c-accent)] underline underline-offset-[3px]",
           },
         },
       }),
@@ -297,6 +351,8 @@ export function DocxEditor() {
       Image.configure({
         allowBase64: true,
       }),
+      Figure,
+      ChartBlock,
     ],
     content: editorState.content,
   });
@@ -376,6 +432,22 @@ export function DocxEditor() {
     selector: ({ editor: currentEditor }) => (currentEditor ? currentEditor.isEmpty : false),
   });
 
+  const wordStats = useEditorState({
+    editor,
+    selector: ({ editor: currentEditor }) => {
+      if (!currentEditor) return { words: 0, chars: 0 };
+      const text = currentEditor.getText().trim();
+      const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
+      return { words, chars: text.length };
+    },
+  });
+
+  useEffect(() => {
+    if (!error) return;
+    const id = window.setTimeout(() => setError(""), 6000);
+    return () => window.clearTimeout(id);
+  }, [error]);
+
   useEffect(() => {
     if (currentToolbarState.selectedCommentId) {
       setActiveCommentId(currentToolbarState.selectedCommentId);
@@ -407,6 +479,8 @@ export function DocxEditor() {
       }));
       setComments([]);
       setActiveCommentId("");
+      setPaperPulse(true);
+      window.setTimeout(() => setPaperPulse(false), 700);
     } catch {
       setError("Could not import DOCX. Try a different file.");
     } finally {
@@ -472,6 +546,20 @@ export function DocxEditor() {
     else chain.setFontSize(value).run();
   };
 
+  const handleBlockTypeChange = (value: string) => {
+    if (!editor) return;
+    const chain = editor.chain().focus();
+    if (value === "paragraph") {
+      chain.setParagraph().run();
+      return;
+    }
+    const m = /^h([1-6])$/.exec(value);
+    if (m) {
+      const level = Number(m[1]) as 1 | 2 | 3 | 4 | 5 | 6;
+      chain.setHeading({ level }).run();
+    }
+  };
+
   const handleInsertTableDialogOpenChange = (open: boolean) => {
     setInsertTableOpen(open);
     if (open) {
@@ -484,6 +572,104 @@ export function DocxEditor() {
     if (!editor) return;
     editor.chain().focus().insertTable({ rows, cols, withHeaderRow: insertTableHeaderRow }).run();
     setInsertTableOpen(false);
+  };
+
+  const handleCanvasDragEnter = (e: DragEvent) => {
+    e.preventDefault();
+    if (e.dataTransfer.types.includes("Files")) {
+      setDragOverCanvas(true);
+    }
+  };
+
+  const handleCanvasDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleCanvasDragLeave = (e: DragEvent) => {
+    e.preventDefault();
+    const next = e.relatedTarget as Node | null;
+    if (!canvasDropRef.current?.contains(next)) {
+      setDragOverCanvas(false);
+    }
+  };
+
+  const handleCanvasDrop = (e: DragEvent) => {
+    e.preventDefault();
+    setDragOverCanvas(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file?.name.toLowerCase().endsWith(".docx")) {
+      void handleUpload(file);
+    }
+  };
+
+  const handleImageDialogOpenChange = (open: boolean) => {
+    setImageDialogOpen(open);
+    if (!open) setImageUrlDraft("");
+  };
+
+  const handleImageDialogSubmit = () => {
+    const src = imageUrlDraft.trim();
+    if (!src || !editor) return;
+    editor.chain().focus().setImage({ src }).run();
+    setImageDialogOpen(false);
+    setImageUrlDraft("");
+  };
+
+  const handleFigureDialogOpenChange = (open: boolean) => {
+    setFigureDialogOpen(open);
+    if (open) {
+      setFigureUrlDraft("");
+      setFigureAltDraft("");
+      setFigureCaptionDraft("");
+    }
+  };
+
+  const handleFigureSubmit = () => {
+    const src = figureUrlDraft.trim();
+    if (!src || !editor) return;
+    editor
+      .chain()
+      .focus()
+      .insertFigure({ src, alt: figureAltDraft.trim(), caption: figureCaptionDraft.trim() })
+      .run();
+    handleFigureDialogOpenChange(false);
+  };
+
+  const handleChartDialogOpenChange = (open: boolean) => {
+    setChartDialogOpen(open);
+    if (open) {
+      setChartTitleDraft("");
+      setChartTypeDraft("bar");
+      setChartLabelsDraft("Q1,Q2,Q3,Q4");
+      setChartValuesDraft("12,19,14,22");
+      setChartCaptionDraft("");
+    }
+  };
+
+  const handleChartSubmit = () => {
+    if (!editor) return;
+    const labels = chartLabelsDraft
+      .split(/[,;\n]/)
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const values = chartValuesDraft
+      .split(/[,;\s]+/)
+      .map((x) => parseFloat(x.trim()))
+      .filter((n) => !Number.isNaN(n));
+    if (labels.length === 0 || values.length === 0) return;
+    editor
+      .chain()
+      .focus()
+      .insertChartBlock({
+        title: chartTitleDraft.trim(),
+        chartType: chartTypeDraft,
+        labels,
+        values,
+        caption: chartCaptionDraft.trim(),
+      })
+      .run();
+    setChartDialogOpen(false);
   };
 
   const openAddCommentDialog = () => {
@@ -554,10 +740,19 @@ export function DocxEditor() {
 
   const handleJumpToComment = (commentId: string) => {
     if (!editor) return;
-    const pos = findCommentPosition(editor, commentId);
-    if (pos === null) return;
-    editor.chain().focus().setTextSelection(pos).run();
+    const range = findCommentRange(editor, commentId);
+    if (range === null) return;
+    editor.chain().focus().setTextSelection({ from: range.from, to: range.to }).scrollIntoView().run();
     setActiveCommentId(commentId);
+    requestAnimationFrame(() => {
+      const root = editor.view.dom as HTMLElement;
+      const escaped =
+        typeof CSS !== "undefined" && typeof CSS.escape === "function"
+          ? CSS.escape(commentId)
+          : commentId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      const el = root.querySelector(`[data-comment-id="${escaped}"]`) as HTMLElement | null;
+      el?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+    });
   };
 
   const handleToggleResolved = (commentId: string) => {
@@ -590,50 +785,86 @@ export function DocxEditor() {
     }
   };
 
+  const pageEstimate = Math.ceil((wordStats?.words ?? 0) / 250);
+
+  const chartLabelsParsed = chartLabelsDraft
+    .split(/[,;\n]/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const chartValuesParsed = chartValuesDraft
+    .split(/[,;\s]+/)
+    .map((x) => parseFloat(x.trim()))
+    .filter((n) => !Number.isNaN(n));
+  const canInsertChart = chartLabelsParsed.length > 0 && chartValuesParsed.length > 0;
+
   return (
-    <div className="mx-auto flex w-full max-w-[1360px] flex-1 flex-col gap-6 px-4 pb-12 pt-5 sm:px-6 lg:px-10">
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200/90 bg-white px-5 py-4 shadow-[0_1px_0_0_rgb(15_23_42/0.04),0_8px_24px_-4px_rgb(15_23_42/0.08)] sm:px-6">
-        <div className="flex min-w-0 items-center gap-4">
-          <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-linear-to-br from-slate-800 to-slate-900 text-white shadow-inner shadow-white/10">
-            <FileText className="size-6" strokeWidth={1.75} />
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-base font-semibold tracking-tight text-slate-900">{editorState.fileName}</p>
-            <p className="mt-0.5 text-sm text-slate-500">
-              DOCX — export keeps structure (tables, headings, images)
+    <div className="flex min-h-0 flex-1 flex-col">
+      <header className="editorial-head sticky top-0 z-30 flex h-[52px] shrink-0 items-center border-b border-[var(--c-border-soft)] bg-[var(--c-chrome-glass)] backdrop-blur-xl backdrop-saturate-150">
+        <div className="mx-auto flex w-full max-w-[1360px] flex-wrap items-center justify-between gap-3 px-5 sm:px-8 lg:px-12">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <span className="font-[family-name:var(--font-display)] text-lg font-semibold tracking-tight text-[var(--c-ink)]">
+              DOCX
+            </span>
+            <span className="mx-0.5 h-4 w-px shrink-0 bg-[var(--c-border)]" aria-hidden />
+            <p
+              className="min-w-0 max-w-[260px] truncate text-sm text-[var(--c-ink-muted)]"
+              title={editorState.fileName}
+            >
+              {editorState.fileName}
             </p>
           </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".docx"
+              className="hidden"
+              onChange={(event) => handleUpload(event.target.files?.[0])}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              aria-label="Upload"
+              title="Upload"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={editorState.isProcessing}
+              className="h-8 px-0 text-sm font-medium sm:px-3"
+            >
+              {editorState.isProcessing ? (
+                <Loader2 className="mx-auto size-3.5 animate-spin sm:mx-0" aria-hidden />
+              ) : (
+                <Upload className="mx-auto size-3.5 sm:mx-0 sm:mr-2" aria-hidden />
+              )}
+              <span className="hidden sm:inline">Upload</span>
+            </Button>
+            <Button
+              type="button"
+              aria-label="Export DOCX"
+              title="Export DOCX"
+              onClick={handleExport}
+              disabled={!editor || editorState.isProcessing}
+              className="h-8 px-0 text-sm font-medium sm:px-4"
+            >
+              {editorState.isProcessing ? (
+                <Loader2 className="mx-auto size-3.5 animate-spin sm:mx-0" aria-hidden />
+              ) : (
+                <Save className="mx-auto size-3.5 sm:mx-0 sm:mr-2" aria-hidden />
+              )}
+              <span className="hidden sm:inline">
+                {editorState.isProcessing ? "Processing…" : "Export DOCX"}
+              </span>
+            </Button>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2.5">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".docx"
-            className="hidden"
-            onChange={(event) => handleUpload(event.target.files?.[0])}
-          />
-          <Button
-            variant="outline"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={editorState.isProcessing}
-            className="h-10 border-slate-200/90 bg-white px-4 shadow-sm hover:bg-slate-50"
-          >
-            <Upload className="mr-2 size-4" />
-            Upload
-          </Button>
-          <Button
-            onClick={handleExport}
-            disabled={!editor || editorState.isProcessing}
-            className="h-10 px-5 shadow-md shadow-slate-900/15"
-          >
-            <Save className="mr-2 size-4" />
-            {editorState.isProcessing ? "Processing…" : "Export DOCX"}
-          </Button>
-        </div>
-      </div>
+      </header>
 
-      <div className="sticky top-3 z-10 flex flex-col gap-3 rounded-2xl border border-slate-200/90 bg-white/95 p-3 shadow-[0_1px_0_0_rgb(15_23_42/0.05),0_12px_32px_-8px_rgb(15_23_42/0.12)] backdrop-blur-md supports-backdrop-filter:bg-white/90">
-        <div className="flex flex-wrap items-end gap-x-3 gap-y-2 sm:gap-x-4">
+      <div className="editorial-toolbar sticky top-[52px] z-20 w-full min-w-0 border-b border-[var(--c-border-soft)] bg-[var(--c-chrome-glass)] backdrop-blur-xl backdrop-saturate-150">
+        <div className="flex flex-col gap-0 px-3 py-2 sm:px-6 lg:px-10">
+          <div
+            role="toolbar"
+            aria-label="Font and text styles"
+            className="flex min-h-[38px] w-full min-w-0 flex-wrap items-center gap-0 overflow-x-auto [scrollbar-width:thin]"
+          >
           <ToolbarSection title="History">
             <ToolbarButton
               title="Undo"
@@ -651,104 +882,32 @@ export function DocxEditor() {
             </ToolbarButton>
           </ToolbarSection>
 
-          <ToolbarSection title="Headings">
-            <ToolbarButton
-              title="Paragraph"
-              onClick={() => editor?.chain().focus().setParagraph().run()}
-              active={currentToolbarState.isParagraph}
-              disabled={!editor}
-            >
-              <Pilcrow className="size-4" />
-            </ToolbarButton>
-            <ToolbarButton
-              title="Heading 1"
-              onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
-              active={currentToolbarState.isHeading1}
-              disabled={!editor}
-            >
-              <Heading1 className="size-4" />
-            </ToolbarButton>
-            <ToolbarButton
-              title="Heading 2"
-              onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()}
-              active={currentToolbarState.isHeading2}
-              disabled={!editor}
-            >
-              <Heading2 className="size-4" />
-            </ToolbarButton>
-            <ToolbarButton
-              title="Heading 3"
-              onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()}
-              active={currentToolbarState.isHeading3}
-              disabled={!editor}
-            >
-              <Heading3 className="size-4" />
-            </ToolbarButton>
-            <ToolbarButton
-              title="Heading 4"
-              onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).run()}
-              active={currentToolbarState.isHeading4}
-              disabled={!editor}
-              className="w-9 px-0 text-[11px] font-semibold"
-            >
-              H4
-            </ToolbarButton>
-            <ToolbarButton
-              title="Heading 5"
-              onClick={() => editor?.chain().focus().toggleHeading({ level: 5 }).run()}
-              active={currentToolbarState.isHeading5}
-              disabled={!editor}
-              className="w-9 px-0 text-[11px] font-semibold"
-            >
-              H5
-            </ToolbarButton>
-            <ToolbarButton
-              title="Heading 6"
-              onClick={() => editor?.chain().focus().toggleHeading({ level: 6 }).run()}
-              active={currentToolbarState.isHeading6}
-              disabled={!editor}
-              className="w-9 px-0 text-[11px] font-semibold"
-            >
-              H6
-            </ToolbarButton>
-          </ToolbarSection>
+          <ToolbarDivider />
 
-          <ToolbarSection title="Align">
-            <ToolbarButton
-              title="Align left"
-              onClick={() => editor?.chain().focus().setTextAlign("left").run()}
-              active={currentToolbarState.textAlign === "left"}
+          <ToolbarGroup label="Text styles">
+            <label htmlFor="toolbar-block-type" className="sr-only">
+              Paragraph style
+            </label>
+            <select
+              id="toolbar-block-type"
               disabled={!editor}
+              value={getBlockTypeSelectValue(currentToolbarState)}
+              onChange={(e) => handleBlockTypeChange(e.target.value)}
+              className="h-8 min-w-[10.5rem] max-w-[12rem] rounded-md border border-[var(--c-border-soft)] bg-[var(--c-paper)] px-2 text-sm text-[var(--c-ink)] shadow-sm focus:border-[var(--c-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--c-accent)] disabled:pointer-events-none disabled:opacity-30 font-[family-name:var(--font-ui)]"
             >
-              <AlignLeft className="size-4" />
-            </ToolbarButton>
-            <ToolbarButton
-              title="Align center"
-              onClick={() => editor?.chain().focus().setTextAlign("center").run()}
-              active={currentToolbarState.textAlign === "center"}
-              disabled={!editor}
-            >
-              <AlignCenter className="size-4" />
-            </ToolbarButton>
-            <ToolbarButton
-              title="Align right"
-              onClick={() => editor?.chain().focus().setTextAlign("right").run()}
-              active={currentToolbarState.textAlign === "right"}
-              disabled={!editor}
-            >
-              <AlignRight className="size-4" />
-            </ToolbarButton>
-            <ToolbarButton
-              title="Justify"
-              onClick={() => editor?.chain().focus().setTextAlign("justify").run()}
-              active={currentToolbarState.textAlign === "justify"}
-              disabled={!editor}
-            >
-              <AlignJustify className="size-4" />
-            </ToolbarButton>
-          </ToolbarSection>
+              <option value="paragraph">Normal text</option>
+              <option value="h1">Heading 1</option>
+              <option value="h2">Heading 2</option>
+              <option value="h3">Heading 3</option>
+              <option value="h4">Heading 4</option>
+              <option value="h5">Heading 5</option>
+              <option value="h6">Heading 6</option>
+            </select>
+          </ToolbarGroup>
 
-          <ToolbarSection title="Font" clusterClassName="items-stretch gap-1.5 px-2 py-1">
+          <ToolbarDivider />
+
+          <ToolbarSection title="Font" clusterClassName="items-stretch gap-1.5">
             <label htmlFor="toolbar-font-family" className="sr-only">
               Font family
             </label>
@@ -757,7 +916,7 @@ export function DocxEditor() {
               disabled={!editor}
               value={currentToolbarState.fontFamily || ""}
               onChange={(e) => handleFontFamilyChange(e.target.value)}
-              className="h-9 max-w-42 min-w-32 rounded-lg border border-slate-200/80 bg-white px-2 text-sm text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:opacity-50"
+              className="h-8 min-w-[9.5rem] max-w-[12rem] rounded-md border border-[var(--c-border-soft)] bg-[var(--c-paper)] px-2 text-sm text-[var(--c-ink)] shadow-sm focus:border-[var(--c-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--c-accent)] disabled:pointer-events-none disabled:opacity-30 font-[family-name:var(--font-ui)]"
             >
               {FONT_FAMILIES.map((f) => (
                 <option key={f.label + f.value} value={f.value}>
@@ -781,7 +940,7 @@ export function DocxEditor() {
               disabled={!editor}
               value={currentToolbarState.fontSize || ""}
               onChange={(e) => handleFontSizeChange(e.target.value)}
-              className="h-9 w-22 shrink-0 rounded-lg border border-slate-200/80 bg-white px-2 text-sm text-slate-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-300 disabled:opacity-50"
+              className="h-8 w-[80px] shrink-0 rounded-md border border-[var(--c-border-soft)] bg-[var(--c-paper)] px-2 text-sm text-[var(--c-ink)] shadow-sm focus:border-[var(--c-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--c-accent)] disabled:pointer-events-none disabled:opacity-30 font-[family-name:var(--font-ui)]"
             >
               {FONT_SIZES.map((s) => (
                 <option key={s.label + s.value} value={s.value}>
@@ -794,9 +953,9 @@ export function DocxEditor() {
               ) : null}
             </select>
           </ToolbarSection>
-        </div>
 
-        <div className="flex flex-wrap items-end gap-x-3 gap-y-2 sm:gap-x-4">
+          <ToolbarDivider />
+
           <ToolbarSection title="Style">
             <ToolbarButton
               title="Bold"
@@ -848,6 +1007,8 @@ export function DocxEditor() {
             </ToolbarButton>
           </ToolbarSection>
 
+          <ToolbarDivider />
+
           <ToolbarSection title="Highlight">
             <ToolbarButton
               title="Toggle highlight"
@@ -857,26 +1018,26 @@ export function DocxEditor() {
             >
               <Highlighter className="size-4" />
             </ToolbarButton>
-            {HIGHLIGHT_COLORS.map((color) => (
+            {HIGHLIGHT_COLORS.map(({ hex, label }) => (
               <Button
-                key={color}
+                key={hex}
                 type="button"
                 variant="ghost"
                 size="icon"
-                title={`Highlight ${color}`}
-                aria-label={`Highlight ${color}`}
-                onClick={() => handleSetHighlightColor(color)}
+                title={`Highlight ${label}`}
+                aria-label={`Highlight ${label}`}
+                onClick={() => handleSetHighlightColor(hex)}
                 disabled={!editor}
                 className={cn(
-                  "h-9 w-9 rounded-lg text-slate-600 hover:bg-slate-200/80",
+                  "toolbar-btn h-8 w-8 rounded-md text-[var(--c-ink-muted)] hover:bg-[var(--c-accent-tint)] hover:text-[var(--c-accent)] disabled:pointer-events-none disabled:opacity-30",
                   currentToolbarState.isHighlight &&
-                    currentToolbarState.highlightColor === color &&
-                    "bg-slate-900 text-white ring-2 ring-slate-900 ring-offset-2 ring-offset-[rgb(248_250_252)] hover:bg-slate-800 hover:text-white",
+                    currentToolbarState.highlightColor === hex &&
+                    "ring-1 ring-[var(--c-accent)] ring-offset-1 ring-offset-[var(--c-chrome)]",
                 )}
               >
                 <span
-                  className="h-4 w-4 rounded-full border border-slate-300/80 shadow-sm"
-                  style={{ backgroundColor: color }}
+                  className="h-3.5 w-3.5 rounded-full border border-[var(--c-border)] shadow-sm"
+                  style={{ backgroundColor: hex }}
                 />
               </Button>
             ))}
@@ -884,6 +1045,8 @@ export function DocxEditor() {
               <Ban className="size-4" />
             </ToolbarButton>
           </ToolbarSection>
+
+          <ToolbarDivider />
 
           <ToolbarSection title="Script">
             <ToolbarButton
@@ -903,6 +1066,72 @@ export function DocxEditor() {
               <SuperscriptIcon className="size-4" />
             </ToolbarButton>
           </ToolbarSection>
+          </div>
+
+          <div className="my-1.5 h-px w-full shrink-0 bg-[var(--c-border-soft)]" aria-hidden />
+
+          <div
+            role="toolbar"
+            aria-label="Paragraph layout and inserts"
+            className="flex min-h-[38px] w-full min-w-0 flex-wrap items-center gap-0 overflow-x-auto [scrollbar-width:thin]"
+          >
+          <ToolbarSection title="Align">
+            <ToolbarButton
+              title="Align left"
+              onClick={() => editor?.chain().focus().setTextAlign("left").run()}
+              active={currentToolbarState.textAlign === "left"}
+              disabled={!editor}
+            >
+              <AlignLeft className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              title="Align center"
+              onClick={() => editor?.chain().focus().setTextAlign("center").run()}
+              active={currentToolbarState.textAlign === "center"}
+              disabled={!editor}
+            >
+              <AlignCenter className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              title="Align right"
+              onClick={() => editor?.chain().focus().setTextAlign("right").run()}
+              active={currentToolbarState.textAlign === "right"}
+              disabled={!editor}
+            >
+              <AlignRight className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              title="Justify"
+              onClick={() => editor?.chain().focus().setTextAlign("justify").run()}
+              active={currentToolbarState.textAlign === "justify"}
+              disabled={!editor}
+            >
+              <AlignJustify className="size-4" />
+            </ToolbarButton>
+          </ToolbarSection>
+
+          <ToolbarDivider />
+
+          <ToolbarSection title="Lists">
+            <ToolbarButton
+              title="Bullet list"
+              onClick={() => editor?.chain().focus().toggleBulletList().run()}
+              active={currentToolbarState.isBulletList}
+              disabled={!editor}
+            >
+              <List className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              title="Ordered list"
+              onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+              active={currentToolbarState.isOrderedList}
+              disabled={!editor}
+            >
+              <ListOrdered className="size-4" />
+            </ToolbarButton>
+          </ToolbarSection>
+
+          <ToolbarDivider />
 
           <ToolbarSection title="Blocks">
             <ToolbarButton
@@ -940,29 +1169,10 @@ export function DocxEditor() {
             </ToolbarButton>
           </ToolbarSection>
 
-          <ToolbarSection title="Lists">
-            <ToolbarButton
-              title="Bullet list"
-              onClick={() => editor?.chain().focus().toggleBulletList().run()}
-              active={currentToolbarState.isBulletList}
-              disabled={!editor}
-            >
-              <List className="size-4" />
-            </ToolbarButton>
-            <ToolbarButton
-              title="Ordered list"
-              onClick={() => editor?.chain().focus().toggleOrderedList().run()}
-              active={currentToolbarState.isOrderedList}
-              disabled={!editor}
-            >
-              <ListOrdered className="size-4" />
-            </ToolbarButton>
-          </ToolbarSection>
-        </div>
+          <ToolbarDivider />
 
-        <div className="flex flex-wrap items-end gap-x-3 gap-y-2 sm:gap-x-4">
           <ToolbarSection title="Table" bare>
-            <div className="flex flex-wrap items-end gap-2">
+            <div className="flex flex-wrap items-center gap-0.5">
               <ToolbarCluster label="Insert and rows">
             <ToolbarButton
               title="Insert table"
@@ -1015,6 +1225,8 @@ export function DocxEditor() {
             </ToolbarButton>
           </ToolbarCluster>
 
+          <ToolbarDivider />
+
           <ToolbarCluster label="Header style">
             <ToolbarButton
               title="Toggle header row"
@@ -1038,6 +1250,8 @@ export function DocxEditor() {
               <Grid2x2 className="size-4" />
             </ToolbarButton>
           </ToolbarCluster>
+
+          <ToolbarDivider />
 
           <ToolbarCluster label="Cells">
             <ToolbarButton
@@ -1079,42 +1293,92 @@ export function DocxEditor() {
             </div>
           </ToolbarSection>
 
+          <ToolbarDivider />
+
           <ToolbarSection title="Insert">
             <ToolbarButton
               title="Insert image"
               onClick={() => {
-                const src = window.prompt("Image URL");
-                if (src) {
-                  editor?.chain().focus().setImage({ src }).run();
-                }
+                setImageUrlDraft("");
+                setImageDialogOpen(true);
               }}
               disabled={!editor}
             >
               <ImagePlus className="size-4" />
             </ToolbarButton>
+            <ToolbarButton
+              title="Insert figure with caption"
+              onClick={() => {
+                handleFigureDialogOpenChange(true);
+              }}
+              disabled={!editor}
+            >
+              <Frame className="size-4" />
+            </ToolbarButton>
+            <ToolbarButton
+              title="Insert chart"
+              onClick={() => handleChartDialogOpenChange(true)}
+              disabled={!editor}
+            >
+              <ChartColumn className="size-4" />
+            </ToolbarButton>
           </ToolbarSection>
+        </div>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] lg:items-start lg:gap-8">
-        <div className="editor-canvas p-4 sm:p-6 md:p-8 lg:p-10">
-          <div
-            className="editor-canvas-paper relative mx-auto w-full max-w-[816px] px-5 py-8 sm:px-8 sm:py-10 md:px-12 md:py-14"
-            data-placeholder={isPlaceholderDoc ? "true" : "false"}
+      {error ? (
+        <div className="mx-auto w-full max-w-[1360px] px-5 pt-3 sm:px-8 lg:px-12">
+          <p
+            role="alert"
+            className="editorial-error-banner rounded-full border border-[var(--c-error-border)] bg-[var(--c-error-bg)] px-4 py-2 text-sm text-[var(--c-error)] font-[family-name:var(--font-ui)]"
           >
+            {error}
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mx-auto flex w-full max-w-[1360px] flex-1 flex-col gap-6 px-5 pb-6 pt-8 sm:px-8 lg:px-12">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] lg:items-start lg:gap-8">
+          <div
+            ref={canvasDropRef}
+            className="editorial-canvas-reveal editor-canvas relative order-1 p-8 sm:p-10 md:p-12 lg:p-14"
+            onDragEnter={handleCanvasDragEnter}
+            onDragOver={handleCanvasDragOver}
+            onDragLeave={handleCanvasDragLeave}
+            onDrop={handleCanvasDrop}
+          >
+            {dragOverCanvas ? (
+              <div
+                className="editorial-drag-overlay pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-[var(--c-accent)] bg-[rgba(254,240,231,0.85)] backdrop-blur-sm"
+                aria-hidden
+              >
+                <Upload className="size-12 text-[var(--c-accent)]" strokeWidth={1.5} />
+                <p className="font-[family-name:var(--font-display)] text-xl font-semibold text-[var(--c-ink)]">
+                  Drop .docx to open
+                </p>
+              </div>
+            ) : null}
+            <div
+              className={cn(
+                "editor-canvas-paper relative mx-auto w-full max-w-[816px] px-6 py-8 md:px-[96px] md:py-[96px]",
+                paperPulse && "editorial-paper-settle",
+              )}
+              data-placeholder={isPlaceholderDoc ? "true" : "false"}
+            >
             {isPlaceholderDoc ? (
-              <div className="mb-6 rounded-2xl border-2 border-dashed border-slate-300/90 bg-linear-to-b from-white to-slate-50/90 p-7 text-center shadow-[inset_0_1px_0_0_rgb(255_255_255/0.8)] sm:mb-8 sm:p-8">
-                <div className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-linear-to-br from-slate-800 to-slate-900 text-white shadow-lg shadow-slate-900/20">
-                  <Upload className="size-7" strokeWidth={1.75} />
-                </div>
-                <p className="mt-5 text-base font-semibold tracking-tight text-slate-900">Open a document</p>
-                <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-slate-500">
+              <div className="mb-8 rounded-xl border-2 border-dashed border-[var(--c-border)] bg-[rgba(254,252,245,0.7)] p-8 text-center">
+                <Upload className="mx-auto size-12 text-[var(--c-accent)]" strokeWidth={1.5} />
+                <p className="mt-5 font-[family-name:var(--font-display)] text-xl font-semibold tracking-tight text-[var(--c-ink)]">
+                  Open a document
+                </p>
+                <p className="mx-auto mt-2 max-w-xs text-sm leading-relaxed text-[var(--c-ink-muted)] font-[family-name:var(--font-ui)]">
                   Upload a .docx file to edit with full formatting, or start typing in the page below.
                 </p>
                 <Button
                   type="button"
                   variant="outline"
-                  className="mt-6 h-10 border-slate-200 bg-white px-6 shadow-sm hover:bg-slate-50"
+                  className="mt-6 h-10 border-[var(--c-accent)] bg-transparent px-6 text-[var(--c-accent)] hover:bg-[var(--c-accent-tint)]"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={editorState.isProcessing}
                 >
@@ -1130,7 +1394,7 @@ export function DocxEditor() {
             {editor ? (
               <BubbleMenu
                 editor={editor}
-                className="z-50 flex items-center gap-1 rounded-xl border border-slate-200/90 bg-white p-1 shadow-lg shadow-slate-900/10"
+                className="animate-[editorial-fade-up_120ms_ease_both] z-50 flex items-center gap-1 rounded-lg border border-[var(--c-border)] bg-[var(--c-paper)] p-1 shadow-[0_4px_16px_rgba(28,23,18,0.14)]"
                 shouldShow={({ editor: ed }) => !ed.state.selection.empty}
               >
                 {currentToolbarState.isCommentMark ? (
@@ -1138,6 +1402,7 @@ export function DocxEditor() {
                     type="button"
                     size="sm"
                     variant="outline"
+                    className="border-[var(--c-border)] text-[var(--c-accent)] hover:bg-[var(--c-accent-tint)]"
                     onClick={() => editor.chain().focus().unsetComment().run()}
                   >
                     Remove comment
@@ -1152,48 +1417,68 @@ export function DocxEditor() {
             ) : null}
           </div>
         </div>
-        <aside className="lg:sticky lg:top-24 h-fit rounded-2xl border border-slate-200/90 bg-white p-5 shadow-[0_1px_0_0_rgb(15_23_42/0.04),0_12px_32px_-8px_rgb(15_23_42/0.1)]">
-          <div className="mb-4 flex items-center justify-between gap-2 border-b border-slate-100 pb-4">
-            <h2 className="text-sm font-semibold tracking-tight text-slate-900">Comments</h2>
-            <span className="rounded-full bg-slate-900 px-2.5 py-0.5 text-xs font-semibold text-white tabular-nums">
+        <aside className="editorial-aside-reveal order-2 h-fit w-full min-w-0 max-w-[340px] rounded-xl border border-[var(--c-border-soft)] bg-[var(--c-paper)] p-5 font-[family-name:var(--font-ui)] shadow-[0_1px_0_rgba(28,23,18,0.04),0_8px_24px_rgba(28,23,18,0.08)] lg:sticky lg:top-[var(--app-sidebar-top)] lg:max-h-[calc(100vh-9rem)] lg:min-w-[280px] lg:overflow-y-auto">
+          <div className="mb-4 flex items-center justify-between gap-2 border-b border-[var(--c-border-soft)] pb-4">
+            <h2 className="text-sm font-semibold text-[var(--c-ink)]">Comments</h2>
+            <span className="rounded-full bg-[var(--c-accent)] px-2.5 py-0.5 text-xs font-semibold text-white tabular-nums">
               {comments.length}
             </span>
           </div>
           {comments.length === 0 ? (
-            <p className="text-sm leading-relaxed text-slate-500">
+            <p className="text-sm leading-relaxed text-[var(--c-ink-muted)]">
               Select text in the document — the floating{" "}
-              <strong className="font-medium text-slate-800">Comment</strong> button appears above your selection.
+              <strong className="font-medium text-[var(--c-ink)]">Comment</strong> button appears above your selection.
             </p>
           ) : (
-            <div className="flex max-h-[min(70vh,560px)] flex-col gap-2 overflow-y-auto pr-1">
+            <div className="flex flex-col gap-2 overflow-y-auto pr-1">
               {comments.map((comment) => (
                 <div
                   key={comment.id}
+                  role="button"
+                  tabIndex={0}
                   className={cn(
-                    "rounded-xl border p-3 transition-colors",
-                    comment.resolved && "opacity-60",
-                    activeCommentId === comment.id ? "border-slate-900 bg-slate-50" : "border-slate-200/90 bg-slate-50/30",
+                    "cursor-pointer rounded-lg border p-3 text-left font-[family-name:var(--font-ui)] transition-colors duration-100 outline-none hover:border-[var(--c-border)] focus-visible:ring-1 focus-visible:ring-[var(--c-accent)]",
+                    comment.resolved && "opacity-[0.55]",
+                    activeCommentId === comment.id
+                      ? "border border-[var(--c-accent)] bg-[var(--c-comment-bg)] pl-3"
+                      : "border border-[var(--c-border-soft)] bg-transparent",
                   )}
+                  onClick={() => handleJumpToComment(comment.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleJumpToComment(comment.id);
+                    }
+                  }}
                 >
-                  <button
-                    type="button"
-                    className="w-full text-left text-sm leading-snug text-slate-800"
-                    onClick={() => handleJumpToComment(comment.id)}
-                  >
-                    {comment.text}
-                  </button>
-                  <p className="mt-2 text-[11px] text-slate-500">
+                  <p className="text-sm leading-snug text-[var(--c-ink)]">{comment.text}</p>
+                  <p className="mt-1.5 text-[11px] text-[var(--c-ink-faint)]">
                     {new Date(comment.createdAt).toLocaleString()}
                   </p>
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    <Button size="sm" variant="outline" onClick={() => openEditCommentDialog(comment.id)}>
-                      <Pencil className="size-3.5" />
+                  <div className="mt-2.5 flex flex-wrap gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="size-7 min-w-7 p-0"
+                      onClick={() => openEditCommentDialog(comment.id)}
+                    >
+                      <Pencil className="size-3" />
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => handleToggleResolved(comment.id)}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2.5 text-xs"
+                      onClick={() => handleToggleResolved(comment.id)}
+                    >
                       {comment.resolved ? "Unresolve" : "Resolve"}
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => handleDeleteComment(comment.id)}>
-                      <Trash2 className="size-3.5" />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="size-7 min-w-7 p-0"
+                      onClick={() => handleDeleteComment(comment.id)}
+                    >
+                      <Trash2 className="size-3" />
                     </Button>
                   </div>
                 </div>
@@ -1201,14 +1486,28 @@ export function DocxEditor() {
             </div>
           )}
         </aside>
-      </div>
+        </div>
 
-      {error ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
-      ) : null}
-      <p className="text-center text-xs leading-relaxed text-slate-400/90">
-        Complex nested tables and merged cells may not round-trip perfectly.
-      </p>
+        <footer className="flex min-h-8 flex-wrap items-center gap-x-5 gap-y-1 border-t border-[var(--c-border-soft)] bg-[var(--c-chrome)] px-5 py-1.5 font-[family-name:var(--font-ui)] text-[11px] tabular-nums text-[var(--c-ink-faint)]">
+          <span>
+            Words:{" "}
+            <strong className="font-medium text-[var(--c-ink-muted)]">{wordStats?.words ?? 0}</strong>
+          </span>
+          <span>
+            Characters:{" "}
+            <strong className="font-medium text-[var(--c-ink-muted)]">{wordStats?.chars ?? 0}</strong>
+          </span>
+          <span>
+            ~{pageEstimate} {pageEstimate === 1 ? "page" : "pages"}
+          </span>
+          <span className="ml-auto min-w-0 truncate" title={editorState.fileName}>
+            {editorState.fileName}
+          </span>
+        </footer>
+        <p className="text-center text-xs leading-relaxed text-[var(--c-ink-faint)]">
+          Complex nested tables and merged cells may not round-trip perfectly.
+        </p>
+      </div>
 
       <Dialog open={commentDialogOpen} onOpenChange={handleCommentDialogOpenChange}>
         <DialogContent>
@@ -1221,13 +1520,13 @@ export function DocxEditor() {
             </DialogDescription>
           </DialogHeader>
           <textarea
-            className="min-h-[120px] w-full resize-y rounded-md border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none ring-slate-300 focus:ring-2"
+            className="min-h-[120px] w-full resize-y rounded-md border border-[var(--c-border)] bg-[var(--c-paper)] px-3 py-2 text-sm text-[var(--c-ink)] outline-none transition-shadow duration-100 focus:border-[var(--c-accent)] focus:ring-1 focus:ring-[var(--c-accent)] font-[family-name:var(--font-ui)]"
             value={commentDraft}
             onChange={(event) => setCommentDraft(event.target.value)}
             placeholder="Write a comment…"
             autoFocus
           />
-          <DialogFooter>
+          <DialogFooter className="mt-5 gap-2 sm:justify-end">
             <Button type="button" variant="outline" onClick={() => handleCommentDialogOpenChange(false)}>
               Cancel
             </Button>
@@ -1247,7 +1546,7 @@ export function DocxEditor() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="mx-auto w-fit rounded-xl border border-slate-200 bg-slate-50/90 p-2 shadow-inner">
+            <div className="mx-auto w-fit rounded-lg border border-[var(--c-border-soft)] bg-[var(--c-canvas)] p-2">
               <div
                 className="grid gap-0.5"
                 style={{ gridTemplateColumns: `repeat(${INSERT_TABLE_MAX}, minmax(0, 1fr))` }}
@@ -1262,10 +1561,10 @@ export function DocxEditor() {
                       type="button"
                       aria-label={`Insert ${row} by ${col} table`}
                       className={cn(
-                        "size-3.5 rounded-sm border transition-colors sm:size-4",
+                        "size-4 rounded-sm border transition-colors",
                         inSelection
-                          ? "border-slate-900 bg-slate-900"
-                          : "border-slate-200/90 bg-white hover:bg-slate-100",
+                          ? "border-[var(--c-accent)] bg-[var(--c-accent)]"
+                          : "border-[var(--c-border-soft)] bg-[var(--c-canvas)] hover:bg-[var(--c-accent-tint)]",
                       )}
                       onMouseEnter={() => setInsertTableHover({ rows: row, cols: col })}
                       onClick={() => handleInsertTableFromPicker(row, col)}
@@ -1274,20 +1573,20 @@ export function DocxEditor() {
                 })}
               </div>
             </div>
-            <p className="text-center text-sm font-medium tabular-nums text-slate-700">
+            <p className="mt-3 text-center text-sm font-semibold tabular-nums text-[var(--c-ink)]">
               {insertTableHover.rows} × {insertTableHover.cols}
             </p>
-            <label className="flex cursor-pointer items-center gap-2.5 text-sm text-slate-700">
+            <label className="flex cursor-pointer items-center gap-2.5 text-sm text-[var(--c-ink-muted)]">
               <input
                 type="checkbox"
-                className="size-4 rounded border-slate-300 accent-slate-900"
+                className="size-4 accent-[var(--c-accent)]"
                 checked={insertTableHeaderRow}
                 onChange={(event) => setInsertTableHeaderRow(event.target.checked)}
               />
               Use header row
             </label>
           </div>
-          <DialogFooter>
+          <DialogFooter className="mt-5 gap-2 sm:justify-end">
             <Button type="button" variant="outline" onClick={() => handleInsertTableDialogOpenChange(false)}>
               Cancel
             </Button>
@@ -1296,6 +1595,190 @@ export function DocxEditor() {
               onClick={() => handleInsertTableFromPicker(insertTableHover.rows, insertTableHover.cols)}
             >
               Insert {insertTableHover.rows} × {insertTableHover.cols}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={imageDialogOpen} onOpenChange={handleImageDialogOpenChange}>
+        <DialogContent className="max-w-md gap-5">
+          <DialogHeader>
+            <DialogTitle>Insert image</DialogTitle>
+            <DialogDescription>
+              Paste an image URL. The image is loaded from that address when you view or export the document.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="insert-image-url" className="sr-only">
+              Image URL
+            </label>
+            <input
+              id="insert-image-url"
+              type="text"
+              inputMode="url"
+              autoComplete="url"
+              className="h-9 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-paper)] px-3 text-sm text-[var(--c-ink)] outline-none transition-shadow duration-100 focus:border-[var(--c-accent)] focus:ring-1 focus:ring-[var(--c-accent)] font-[family-name:var(--font-ui)]"
+              placeholder="https://example.com/image.png"
+              value={imageUrlDraft}
+              onChange={(event) => setImageUrlDraft(event.target.value)}
+              autoFocus
+            />
+          </div>
+          <DialogFooter className="mt-5 gap-2 sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => handleImageDialogOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleImageDialogSubmit}
+              disabled={!editor || !imageUrlDraft.trim()}
+            >
+              Insert
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={figureDialogOpen} onOpenChange={handleFigureDialogOpenChange}>
+        <DialogContent className="max-w-md gap-5">
+          <DialogHeader>
+            <DialogTitle>Insert figure</DialogTitle>
+            <DialogDescription>
+              Add an image with an optional caption. Figures are centered on the page and work well for diagrams and photos.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 font-[family-name:var(--font-ui)]">
+            <div>
+              <label htmlFor="figure-url" className="mb-1 block text-xs font-medium text-[var(--c-ink-muted)]">
+                Image URL
+              </label>
+              <input
+                id="figure-url"
+                type="text"
+                className="h-9 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-paper)] px-3 text-sm text-[var(--c-ink)] outline-none focus:border-[var(--c-accent)] focus:ring-1 focus:ring-[var(--c-accent)]"
+                placeholder="https://…"
+                value={figureUrlDraft}
+                onChange={(e) => setFigureUrlDraft(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <div>
+              <label htmlFor="figure-alt" className="mb-1 block text-xs font-medium text-[var(--c-ink-muted)]">
+                Alt text (accessibility)
+              </label>
+              <input
+                id="figure-alt"
+                type="text"
+                className="h-9 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-paper)] px-3 text-sm text-[var(--c-ink)] outline-none focus:border-[var(--c-accent)] focus:ring-1 focus:ring-[var(--c-accent)]"
+                placeholder="Describe the image"
+                value={figureAltDraft}
+                onChange={(e) => setFigureAltDraft(e.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="figure-caption" className="mb-1 block text-xs font-medium text-[var(--c-ink-muted)]">
+                Caption
+              </label>
+              <input
+                id="figure-caption"
+                type="text"
+                className="h-9 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-paper)] px-3 text-sm text-[var(--c-ink)] outline-none focus:border-[var(--c-accent)] focus:ring-1 focus:ring-[var(--c-accent)]"
+                placeholder="Figure 1 — …"
+                value={figureCaptionDraft}
+                onChange={(e) => setFigureCaptionDraft(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter className="mt-5 gap-2 sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => handleFigureDialogOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleFigureSubmit} disabled={!editor || !figureUrlDraft.trim()}>
+              Insert figure
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={chartDialogOpen} onOpenChange={handleChartDialogOpenChange}>
+        <DialogContent className="max-w-md gap-5">
+          <DialogHeader>
+            <DialogTitle>Insert chart</DialogTitle>
+            <DialogDescription>
+              Quick bar or line chart from comma-separated labels and numbers. Export to DOCX includes the graphic as SVG when possible.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 font-[family-name:var(--font-ui)]">
+            <div>
+              <label htmlFor="chart-title" className="mb-1 block text-xs font-medium text-[var(--c-ink-muted)]">
+                Title (optional)
+              </label>
+              <input
+                id="chart-title"
+                type="text"
+                className="h-9 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-paper)] px-3 text-sm text-[var(--c-ink)] outline-none focus:border-[var(--c-accent)] focus:ring-1 focus:ring-[var(--c-accent)]"
+                placeholder="Quarterly results"
+                value={chartTitleDraft}
+                onChange={(e) => setChartTitleDraft(e.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="chart-type" className="mb-1 block text-xs font-medium text-[var(--c-ink-muted)]">
+                Chart type
+              </label>
+              <select
+                id="chart-type"
+                className="h-9 w-full rounded-md border border-[var(--c-border-soft)] bg-[var(--c-paper)] px-2 text-sm text-[var(--c-ink)] focus:border-[var(--c-accent)] focus:ring-1 focus:ring-[var(--c-accent)]"
+                value={chartTypeDraft}
+                onChange={(e) => setChartTypeDraft(e.target.value as "bar" | "line")}
+              >
+                <option value="bar">Bar</option>
+                <option value="line">Line</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="chart-labels" className="mb-1 block text-xs font-medium text-[var(--c-ink-muted)]">
+                Labels (comma-separated)
+              </label>
+              <input
+                id="chart-labels"
+                type="text"
+                className="h-9 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-paper)] px-3 text-sm text-[var(--c-ink)] outline-none focus:border-[var(--c-accent)] focus:ring-1 focus:ring-[var(--c-accent)]"
+                value={chartLabelsDraft}
+                onChange={(e) => setChartLabelsDraft(e.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="chart-values" className="mb-1 block text-xs font-medium text-[var(--c-ink-muted)]">
+                Values (comma-separated numbers)
+              </label>
+              <input
+                id="chart-values"
+                type="text"
+                className="h-9 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-paper)] px-3 text-sm text-[var(--c-ink)] outline-none focus:border-[var(--c-accent)] focus:ring-1 focus:ring-[var(--c-accent)]"
+                value={chartValuesDraft}
+                onChange={(e) => setChartValuesDraft(e.target.value)}
+              />
+            </div>
+            <div>
+              <label htmlFor="chart-caption" className="mb-1 block text-xs font-medium text-[var(--c-ink-muted)]">
+                Caption (optional)
+              </label>
+              <input
+                id="chart-caption"
+                type="text"
+                className="h-9 w-full rounded-md border border-[var(--c-border)] bg-[var(--c-paper)] px-3 text-sm text-[var(--c-ink)] outline-none focus:border-[var(--c-accent)] focus:ring-1 focus:ring-[var(--c-accent)]"
+                value={chartCaptionDraft}
+                onChange={(e) => setChartCaptionDraft(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter className="mt-5 gap-2 sm:justify-end">
+            <Button type="button" variant="outline" onClick={() => handleChartDialogOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleChartSubmit} disabled={!editor || !canInsertChart}>
+              Insert chart
             </Button>
           </DialogFooter>
         </DialogContent>

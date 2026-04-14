@@ -1,36 +1,89 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Custom DOCX Editor
 
-## Getting Started
+Browser-based editor for Word documents: upload a `.docx`, edit rich text in the page, add comments, and export back to `.docx`. Built with [Next.js](https://nextjs.org) (App Router), [TipTap](https://tiptap.dev), [Mammoth](https://github.com/mwilliamson/mammoth.js) for import, and `html-to-docx` for export.
 
-First, run the development server:
+## Features
+
+- **Import / export** — `.docx` → HTML (edit) → `.docx` download
+- **Rich text** — headings, lists, links, images, alignment, font family & size, highlight, tables (resize, merge/split, headers), and more
+- **Comments** — select text and add comments shown in the sidebar
+- **Toolbar** — grouped controls with labeled sections for quicker scanning
+
+## Requirements
+
+- [Node.js](https://nodejs.org/) 20+ (recommended)
+- [pnpm](https://pnpm.io/) (or npm / yarn / bun)
+
+## Getting started
+
+Install dependencies:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Run the development server:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+pnpm dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-## Learn More
+## Scripts
 
-To learn more about Next.js, take a look at the following resources:
+| Command       | Description                    |
+| ------------- | ------------------------------ |
+| `pnpm dev`    | Start dev server (Turbopack)   |
+| `pnpm build`  | Production build               |
+| `pnpm start`  | Run production server          |
+| `pnpm lint`   | Run ESLint                     |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Project layout
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `app/` — Next.js routes, layout, global styles
+- `app/api/export-docx/` — server route that turns HTML into a `.docx` blob
+- `components/` — UI (e.g. `docx-editor.tsx`, `ui/`)
+- `extensions/` — TipTap extensions (e.g. comment marks)
+- `lib/` — helpers (`docx` import/export helpers)
 
-## Deploy on Vercel
+## AI assistants & [graphify](https://github.com/safishamsi/graphify)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+This repo includes **graphify** integration for Cursor and Claude (via `CLAUDE.md` → `AGENTS.md`):
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Cursor:** `.cursor/rules/graphify.mdc` (always applied) — points the assistant at `graphify-out/GRAPH_REPORT.md` once you build a graph.
+- **Claude Code / same instructions:** `AGENTS.md` § graphify.
+
+**One-time setup (Python 3.10+):**
+
+```bash
+pip install graphifyy
+graphify install
+# If `graphify` is not on PATH (Windows): use `python -m graphify install` — same subcommands, e.g. `python -m graphify cursor install`
+```
+
+**Build the full knowledge graph (first time or after doc/image changes):** this is **not** a plain terminal path. Use your AI tool’s **slash command** so the graphify skill runs (e.g. in **Claude Code** type **`/graphify .`** at the repo root). That is different from `python -m graphify .`, which will error — the CLI has no `.` command.
+
+**Terminal-only (no LLM) — after a graph exists, code-only refresh:**
+
+```bash
+python -m graphify update .
+```
+
+**Other CLI examples:** `python -m graphify --help`, `python -m graphify query "…"`, `python -m graphify watch .`
+
+Outputs go to `graphify-out/` (ignored by git). See the [graphify README](https://github.com/safishamsi/graphify/blob/v4/README.md) for `query`, `.graphifyignore`, and MCP options.
+
+## Notes
+
+- Very complex tables (deep nesting, heavy merging) may not round-trip perfectly between import and export.
+- Refer to `AGENTS.md` / `CLAUDE.md` for repo-specific conventions when contributing.
+
+## Deploy
+
+You can deploy like any Next.js app (e.g. [Vercel](https://vercel.com/docs/frameworks/nextjs)). Ensure the `/api/export-docx` route runs in your hosting environment.
+
+## Learn more
+
+- [Next.js documentation](https://nextjs.org/docs)
+- [TipTap documentation](https://tiptap.dev/docs)
